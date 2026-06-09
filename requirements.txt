@@ -1,0 +1,5 @@
+# 全部为“可选”依赖：缺失时工具自动降级，核心分析与 HTML/CSV/Markdown 仍可运行。
+# 安装：pip install -r requirements.txt
+PyYAML>=5.1     # 读取 config.yaml（缺失则用内置默认配置）
+openpyxl>=3.0   # 导出 Excel 多 sheet（缺失则跳过 xlsx，仍可出 csv）
+Jinja2>=2.11    # HTML 模板渲染（缺失则用内置字符串模板降级，HTML 仍可生成）

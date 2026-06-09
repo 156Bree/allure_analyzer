@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>__REPORT_NAME__ · 分析龙虾</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --primary:#2563EB; --primary-dark:#1E40AF; --primary-light:#3B82F6;
+    --bg:#F8FAFC; --card:#FFFFFF; --text:#0F172A; --muted:#64748B;
+    --green:#16A34A; --red:#DC2626; --amber:#F59E0B; --slate:#94A3B8;
+  }
+  *{font-family:Roboto,-apple-system,"Segoe UI","PingFang SC",sans-serif;}
+  body{background:var(--bg);color:var(--text);font-size:13px;}
+  .metric-card{transition:transform .2s ease, box-shadow .2s ease;}
+  .metric-card:hover{transform:translateY(-3px);box-shadow:0 12px 24px -8px rgba(37,99,235,.25);}
+  .tab-btn{transition:all .2s ease;}
+  .tab-btn.active{background:var(--primary);color:#fff;box-shadow:0 6px 16px -6px rgba(37,99,235,.6);}
+  .subtab-btn.active{border-color:var(--primary);color:var(--primary);font-weight:600;}
+  table tbody tr:hover{background:#EFF6FF;}
+  .zebra:nth-child(even){background:#F8FAFC;}
+  .scn-row{background:#F1F5F9 !important;}
+  .badge{display:inline-block;padding:2px 10px;border-radius:9999px;font-weight:600;font-size:11px;}
+  .b-pass{background:#DCFCE7;color:#166534;}
+  .b-fail{background:#FEE2E2;color:#991B1B;}
+  .pill{display:inline-block;padding:2px 10px;border-radius:9999px;font-weight:600;font-size:11px;}
+  .drill{color:var(--primary);font-weight:600;cursor:pointer;text-decoration:none;}
+  .drill:hover{text-decoration:underline;}
+  .caret{display:inline-block;transition:transform .2s ease;cursor:pointer;color:var(--muted);}
+  .caret.open{transform:rotate(90deg);}
+  th.sortable{cursor:pointer;user-select:none;}
+  th.sortable:hover{color:var(--primary);}
+  .modal-mask{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;z-index:50;align-items:center;justify-content:center;}
+  .modal-mask.show{display:flex;}
+  ::-webkit-scrollbar{height:9px;width:9px;}
+  ::-webkit-scrollbar-thumb{background:#CBD5E1;border-radius:9999px;}
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- ============ Header ============ -->
+<header class="bg-gradient-to-r from-[#1E40AF] via-[#2563EB] to-[#3B82F6] text-white shadow-lg">
+  <div class="max-w-[1400px] mx-auto px-6 py-5 flex flex-wrap items-center gap-4 justify-between">
+    <div>
+      <h1 class="text-2xl font-semibold flex items-center gap-2">🦞 分析龙虾 <span class="text-base font-normal opacity-80">Allure Report Analyzer</span></h1>
+      <div id="metaLine" class="text-sm opacity-90 mt-1"></div>
+    </div>
+    <div class="flex items-center gap-3">
+      <span id="reconcileBadge" class="px-3 py-1.5 rounded-lg bg-white/15 text-sm backdrop-blur cursor-help"></span>
+      <a id="originalLink" href="__ORIGINAL_REPORT__" target="_blank" class="px-4 py-1.5 rounded-lg bg-white text-[#1E40AF] font-semibold text-sm hover:bg-blue-50 transition">Original Report ↗</a>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-[1400px] mx-auto px-6 py-6">
+
+  <!-- ============ Overview ============ -->
+  <section id="cards" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-6"></section>
+
+  <section class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-8">
+    <div class="bg-white rounded-xl shadow-sm p-4">
+      <h3 class="font-medium text-slate-600 mb-2">Scenario 状态分布</h3>
+      <canvas id="statusChart" height="200"></canvas>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm p-4">
+      <h3 class="font-medium text-slate-600 mb-2">各机器 Pass Rate (scenario)</h3>
+      <canvas id="hostChart" height="200"></canvas>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm p-4">
+      <h3 class="font-medium text-slate-600 mb-2">各 Owner Pass Rate (case)</h3>
+      <canvas id="ownerChart" height="200"></canvas>
+    </div>
+  </section>
+
+  <!-- ============ Primary Tabs ============ -->
+  <nav class="flex flex-wrap gap-2 mb-4">
+    <button class="tab-btn active px-5 py-2 rounded-lg bg-white shadow-sm font-medium" data-tab="case">Case Result</button>
+    <button class="tab-btn px-5 py-2 rounded-lg bg-white shadow-sm font-medium" data-tab="casesum">Case Result Summary</button>
+    <button class="tab-btn px-5 py-2 rounded-lg bg-white shadow-sm font-medium" data-tab="stepsum">Step Result Summary</button>
+    <button class="tab-btn px-5 py-2 rounded-lg bg-white shadow-sm font-medium" data-tab="extra">附属分析</button>
+  </nav>
+
+  <!-- ---- Tab A: Case Result ---- -->
+  <section id="panel-case" class="tab-panel">
+    <div class="bg-white rounded-xl shadow-sm p-4">
+      <div class="flex flex-wrap items-center gap-3 mb-3">
+        <input id="searchBox" type="text" placeholder="搜索 case / scenario / owner ..." class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm w-64 focus:ring-2 focus:ring-blue-400 outline-none">
+        <select id="fDevice" class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm"></select>
+        <select id="fStatus" class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm">
+          <option value="">全部状态</option><option value="Pass">Pass</option><option value="Fail">Fail</option>
+        </select>
+        <select id="fOwner" class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm"></select>
+        <select id="fComp" class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm"></select>
+        <button id="resetFilter" class="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-sm">重置</button>
+        <span id="caseCount" class="text-slate-500 text-sm ml-auto"></span>
+      </div>
+      <div class="overflow-auto max-h-[640px]">
+        <table class="w-full text-left border-collapse">
+          <thead class="sticky top-0 bg-slate-50 z-10">
+            <tr class="text-slate-600 border-b border-slate-200">
+              <th class="px-2 py-2 w-8"></th>
+              <th class="px-3 py-2 sortable" data-k="case_key">Case (Jira)</th>
+              <th class="px-3 py-2 sortable" data-k="owners">Owner</th>
+              <th class="px-3 py-2 sortable" data-k="components">Component</th>
+              <th class="px-3 py-2 sortable" data-k="host_display">Device</th>
+              <th class="px-3 py-2 sortable" data-k="verdict">Status</th>
+              <th class="px-3 py-2 sortable" data-k="n_total">Scenarios</th>
+            </tr>
+          </thead>
+          <tbody id="caseBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---- Tab B: Case Result Summary ---- -->
+  <section id="panel-casesum" class="tab-panel hidden">
+    <div class="bg-white rounded-xl shadow-sm p-4">
+      <div class="flex gap-4 border-b border-slate-200 mb-3" id="casesumSub"></div>
+      <div id="casesumTable"></div>
+      <p class="text-xs text-slate-400 mt-2">提示：每行 = (case, device) 计数单位，一条 case 在 N 台机器上跑就贡献 N 条记录。Pass / Fail 数字可点击下钻。Component 来自 parentSuite，单一归属（求和 = 行总数）。</p>
+    </div>
+  </section>
+
+  <!-- ---- Tab C: Step Result Summary ---- -->
+  <section id="panel-stepsum" class="tab-panel hidden">
+    <div class="bg-white rounded-xl shadow-sm p-4">
+      <div class="flex gap-4 border-b border-slate-200 mb-3" id="stepsumSub"></div>
+      <div id="stepsumTable"></div>
+      <p class="text-xs text-slate-400 mt-2">提示：Pass / Fail 数字可点击，弹出对应 scenario 清单（1199 口径）。</p>
+    </div>
+  </section>
+
+  <!-- ---- Tab D: Extra ---- -->
+  <section id="panel-extra" class="tab-panel hidden space-y-4">
+    <div class="bg-white rounded-xl shadow-sm p-4">
+      <h3 class="font-medium text-slate-700 mb-2">跨机结果不一致的 Case</h3>
+      <div id="inconsistTable"></div>
+    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="bg-white rounded-xl shadow-sm p-4">
+        <h3 class="font-medium text-slate-700 mb-2">耗时 TopN (scenario)</h3>
+        <div id="topDurTable"></div>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm p-4">
+        <h3 class="font-medium text-slate-700 mb-2">重试 TopN (scenario)</h3>
+        <div id="topRetryTable"></div>
+      </div>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm p-4 overflow-auto">
+      <h3 class="font-medium text-slate-700 mb-2">host × owner 矩阵 (scenario pass/total)</h3>
+      <div id="matrixTable"></div>
+    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="bg-white rounded-xl shadow-sm p-4">
+        <h3 class="font-medium text-slate-700 mb-2">case key 来源分布</h3>
+        <div id="keySrcTable"></div>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm p-4">
+        <h3 class="font-medium text-slate-700 mb-2">UNLINKED 清单</h3>
+        <div id="unlinkedTable"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ============ Modal (scenario 清单) ============ -->
+<div id="modal" class="modal-mask">
+  <div class="bg-white rounded-xl shadow-2xl w-[92%] max-w-4xl max-h-[80vh] flex flex-col">
+    <div class="flex items-center justify-between px-5 py-3 border-b">
+      <h3 id="modalTitle" class="font-semibold"></h3>
+      <button onclick="closeModal()" class="text-slate-400 hover:text-slate-700 text-xl leading-none">&times;</button>
+    </div>
+    <div id="modalBody" class="overflow-auto p-4"></div>
+  </div>
+</div>
+
+<footer class="text-center text-slate-400 text-xs py-6">分析龙虾 · Step 视图按 scenario 记录(scenario × host) 计数；Case 视图按 (case × host) 行计数 —— 一条 case 在 N 台机器上跑算 N 条记录。</footer>
+
+<script id="analysis-data" type="application/json">__ANALYSIS_JSON__</script>
+<script id="reconcile-data" type="application/json">__RECONCILE_JSON__</script>
+<script>
+const DATA = JSON.parse(document.getElementById('analysis-data').textContent);
+const RECON = JSON.parse(document.getElementById('reconcile-data').textContent);
+const TH = DATA.thresholds || {pass_rate_good:0.9, pass_rate_warn:0.7};
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const pct = x => (x*100).toFixed(1)+'%';
+function rateColor(r){ if(r>=TH.pass_rate_good) return '#16A34A'; if(r>=TH.pass_rate_warn) return '#F59E0B'; return '#DC2626'; }
+function ratePill(r){ const c=rateColor(r); return `<span class="pill" style="background:${c}1A;color:${c}">${pct(r)}</span>`; }
+
+/* ---------------- Header / meta ---------------- */
+function initHeader(){
+  const m = DATA.meta||{};
+  document.getElementById('metaLine').innerHTML =
+    `${esc(m.report_name||'Allure Report')} · 生成于 ${esc(m.generated_at||'')} · scenarios ${DATA.counts.scenarios} / case×device 行 ${DATA.counts.cases}（${DATA.counts.unique_cases||DATA.counts.cases} 个唯一 case）`;
+  const b = document.getElementById('reconcileBadge');
+  b.textContent = `对账 ${RECON.visible_records} visible / ${RECON.records_total} total`;
+  b.title = RECON.note || '';
+  if(!(DATA.meta && DATA.meta.original_report)) document.getElementById('originalLink').style.display='none';
+}
+
+/* ---------------- Overview cards ---------------- */
+function metricCard(label, value, sub, color){
+  return `<div class="metric-card bg-white rounded-xl shadow-sm p-3">
+    <div class="text-xs text-slate-500">${esc(label)}</div>
+    <div class="text-2xl font-semibold" style="color:${color||'#0F172A'}">${esc(value)}</div>
+    <div class="text-[11px] text-slate-400">${esc(sub||'')}</div></div>`;
+}
+function initCards(){
+  const s=DATA.overview.scenario, c=DATA.overview.case;
+  document.getElementById('cards').innerHTML =
+    metricCard('Scenario Total', s.total, '记录数 (scenario × host)') +
+    metricCard('Scenario Pass', s.pass, '', '#16A34A') +
+    metricCard('Scenario Fail', s.fail, 'failed+broken', '#DC2626') +
+    metricCard('Scenario Pass Rate', pct(s.pass_rate), '', rateColor(s.pass_rate)) +
+    metricCard('Case Total', c.total, '(case × device) 行') +
+    metricCard('Case Pass', c.pass, '该机器所有 scenario 通过', '#16A34A') +
+    metricCard('Case Fail', c.fail, '', '#DC2626') +
+    metricCard('Case Pass Rate', pct(c.pass_rate), '', rateColor(c.pass_rate));
+}
+
+/* ---------------- Charts ---------------- */
+function initCharts(){
+  const sb=DATA.overview.status_breakdown||{};
+  new Chart(document.getElementById('statusChart'),{type:'doughnut',
+    data:{labels:Object.keys(sb),datasets:[{data:Object.values(sb),
+      backgroundColor:['#16A34A','#DC2626','#F59E0B','#94A3B8','#3B82F6']}]},
+    options:{plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11}}}}}});
+
+  const hd=DATA.scenario_summary.device.slice().sort((a,b)=>a.pass_rate-b.pass_rate);
+  new Chart(document.getElementById('hostChart'),{type:'bar',
+    data:{labels:hd.map(x=>x.name),datasets:[{data:hd.map(x=>+(x.pass_rate*100).toFixed(1)),
+      backgroundColor:hd.map(x=>rateColor(x.pass_rate))}]},
+    options:{indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{max:100}}}});
+
+  const od=DATA.case_summary.owner.slice().sort((a,b)=>a.pass_rate-b.pass_rate);
+  new Chart(document.getElementById('ownerChart'),{type:'bar',
+    data:{labels:od.map(x=>x.name),datasets:[{data:od.map(x=>+(x.pass_rate*100).toFixed(1)),
+      backgroundColor:od.map(x=>rateColor(x.pass_rate))}]},
+    options:{indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{max:100}}}});
+}
+
+/* ---------------- Tabs ---------------- */
+function showTab(name){
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===name));
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.add('hidden'));
+  document.getElementById('panel-'+name).classList.remove('hidden');
+}
+document.querySelectorAll('.tab-btn').forEach(b=>b.addEventListener('click',()=>showTab(b.dataset.tab)));
+
+/* ---------------- Case Result ---------------- */
+let caseSort={k:'case_key',asc:true};
+function initFilters(){
+  const dv=[...new Set(DATA.case_host_rows.map(r=>r.host_display))].sort();
+  document.getElementById('fDevice').innerHTML='<option value="">全部 Device</option>'+dv.map(x=>`<option>${esc(x)}</option>`).join('');
+  const ow=DATA.case_summary.owner.map(x=>x.name);
+  document.getElementById('fOwner').innerHTML='<option value="">全部 Owner</option>'+ow.map(x=>`<option>${esc(x)}</option>`).join('');
+  const cp=DATA.case_summary.component.map(x=>x.name);
+  document.getElementById('fComp').innerHTML='<option value="">全部 Component</option>'+cp.map(x=>`<option>${esc(x)}</option>`).join('');
+  ['searchBox','fDevice','fStatus','fOwner','fComp'].forEach(id=>document.getElementById(id).addEventListener('input',renderCaseTable));
+  document.getElementById('resetFilter').addEventListener('click',()=>{
+    ['searchBox','fDevice','fStatus','fOwner','fComp'].forEach(id=>document.getElementById(id).value='');
+    renderCaseTable();
+  });
+  document.querySelectorAll('#panel-case th.sortable').forEach(th=>th.addEventListener('click',()=>{
+    const k=th.dataset.k; caseSort.asc = caseSort.k===k? !caseSort.asc : true; caseSort.k=k; renderCaseTable();
+  }));
+}
+function caseFiltered(){
+  const q=document.getElementById('searchBox').value.trim().toLowerCase();
+  const dv=document.getElementById('fDevice').value, st=document.getElementById('fStatus').value;
+  const ow=document.getElementById('fOwner').value, cp=document.getElementById('fComp').value;
+  let rows=DATA.case_host_rows.filter(r=>{
+    if(dv && r.host_display!==dv) return false;
+    if(st && r.verdict!==st) return false;
+    if(ow && !(r.owners.length? r.owners.includes(ow) : ow==='(no-owner)')) return false;
+    if(cp && !(r.components.length? r.components.includes(cp) : cp==='(no-component)')) return false;
+    if(q){
+      const hay=(r.case_key+' '+r.host_display+' '+r.owners.join(' ')+' '+r.components.join(' ')).toLowerCase();
+      let hit=hay.includes(q);
+      if(!hit) hit=r.scenario_idx.some(i=>DATA.scenario_rows[i].scenario.toLowerCase().includes(q));
+      if(!hit) return false;
+    }
+    return true;
+  });
+  const k=caseSort.k, mul=caseSort.asc?1:-1;
+  rows.sort((a,b)=>{ let va=a[k],vb=b[k]; if(Array.isArray(va))va=va.join(); if(Array.isArray(vb))vb=vb.join();
+    if(typeof va==='number'&&typeof vb==='number') return (va-vb)*mul;
+    return String(va).localeCompare(String(vb))*mul; });
+  return rows;
+}
+function renderCaseTable(){
+  const rows=caseFiltered();
+  document.getElementById('caseCount').textContent=`${rows.length} 行 (case × device)`;
+  const body=document.getElementById('caseBody');
+  let html='';
+  rows.forEach((r,ri)=>{
+    const badge=r.verdict==='Pass'?'b-pass':'b-fail';
+    const jira=r.jira_url?`<a href="${esc(r.jira_url)}" target="_blank" class="drill">${esc(r.case_key)} ↗</a>`:esc(r.case_key);
+    html+=`<tr class="zebra border-b border-slate-100">
+      <td class="px-2 py-2"><span class="caret" data-rid="${ri}">▶</span></td>
+      <td class="px-3 py-2">${jira}</td>
+      <td class="px-3 py-2">${r.owners.length?esc(r.owners.join(', ')):'<span class="text-slate-400">(no-owner)</span>'}</td>
+      <td class="px-3 py-2">${r.components.length?esc(r.components.join(', ')):'<span class="text-slate-400">-</span>'}</td>
+      <td class="px-3 py-2">${esc(r.host_display)}</td>
+      <td class="px-3 py-2"><span class="badge ${badge}">${r.verdict}</span></td>
+      <td class="px-3 py-2 text-slate-500">${r.n_pass}/${r.n_total}</td></tr>`;
+    html+=`<tr class="scn-child hidden" data-child="${ri}"><td></td><td colspan="6" class="px-3 py-1">
+      <table class="w-full text-xs">${r.scenario_idx.map(i=>{const s=DATA.scenario_rows[i];
+        return `<tr class="border-b border-slate-200"><td class="py-1 pr-2">${s.is_pass?'<span class="badge b-pass">Pass</span>':'<span class="badge b-fail">Fail</span>'}</td>
+          <td class="py-1 pr-2 text-slate-500">${esc(s.status)}</td>
+          <td class="py-1">${esc(s.scenario)}</td></tr>`;}).join('')}</table></td></tr>`;
+  });
+  body.innerHTML=html;
+  body.querySelectorAll('.caret').forEach(c=>c.addEventListener('click',()=>{
+    const rid=c.dataset.rid, child=body.querySelector(`tr[data-child="${rid}"]`);
+    child.classList.toggle('hidden'); c.classList.toggle('open');
+  }));
+}
+
+/* ---------------- Summary tables (Case & Step) ---------------- */
+function summaryTableHTML(rows, grain, dim){
+  let h=`<table class="w-full text-left"><thead><tr class="text-slate-600 border-b border-slate-200">
+    <th class="px-3 py-2">${dim}</th><th class="px-3 py-2">Pass</th><th class="px-3 py-2">Fail</th>
+    <th class="px-3 py-2">Total</th><th class="px-3 py-2">Pass Rate</th></tr></thead><tbody>`;
+  rows.forEach(r=>{
+    const pL=`<a class="drill" onclick="drill('${grain}','${dim}',${JSON.stringify(r.name).replace(/"/g,'&quot;')},'Pass')">${r.pass}</a>`;
+    const fL=`<a class="drill" onclick="drill('${grain}','${dim}',${JSON.stringify(r.name).replace(/"/g,'&quot;')},'Fail')">${r.fail}</a>`;
+    h+=`<tr class="zebra border-b border-slate-100"><td class="px-3 py-2 font-medium">${esc(r.name)}</td>
+      <td class="px-3 py-2">${r.pass?pL:0}</td><td class="px-3 py-2">${r.fail?fL:0}</td>
+      <td class="px-3 py-2">${r.total}</td><td class="px-3 py-2">${ratePill(r.pass_rate)}</td></tr>`;
+  });
+  return h+'</tbody></table>';
+}
+function initSummary(panel, subId, tableId, key){
+  const dims=['owner','component','device'];
+  const sub=document.getElementById(subId);
+  sub.innerHTML=dims.map((d,i)=>`<button class="subtab-btn pb-2 px-1 border-b-2 ${i===0?'active':'border-transparent text-slate-500'}" data-dim="${d}">${d[0].toUpperCase()+d.slice(1)}</button>`).join('');
+  const render=dim=>{document.getElementById(tableId).innerHTML=summaryTableHTML(DATA[key][dim], key==='case_summary'?'case':'step', dim);};
+  sub.querySelectorAll('.subtab-btn').forEach(b=>b.addEventListener('click',()=>{
+    sub.querySelectorAll('.subtab-btn').forEach(x=>{x.classList.remove('active');x.classList.add('border-transparent','text-slate-500');});
+    b.classList.add('active');b.classList.remove('border-transparent','text-slate-500');
+    render(b.dataset.dim);
+  }));
+  render('owner');
+}
+
+/* ---------------- Drill ---------------- */
+function drill(grain, dim, value, status){
+  if(grain==='case'){
+    ['searchBox','fDevice','fStatus','fOwner','fComp'].forEach(id=>document.getElementById(id).value='');
+    if(dim==='owner') document.getElementById('fOwner').value=value;
+    else if(dim==='component') document.getElementById('fComp').value=value;
+    else if(dim==='device') document.getElementById('fDevice').value=value;
+    document.getElementById('fStatus').value=status;
+    showTab('case'); renderCaseTable();
+    window.scrollTo({top:document.getElementById('panel-case').offsetTop-20,behavior:'smooth'});
+  } else {
+    const want = status==='Pass';
+    const rows=DATA.scenario_rows.filter(s=>{
+      let inDim;
+      if(dim==='owner') inDim = s.owners.length? s.owners.includes(value) : value==='(no-owner)';
+      else if(dim==='component') inDim = s.components.length? s.components.includes(value) : value==='(no-component)';
+      else inDim = s.host_display===value;
+      return inDim && (s.is_pass===want);
+    });
+    openModal(`Step ${dim}=${value} · ${status} (${rows.length})`, rows);
+  }
+}
+function openModal(title, rows){
+  document.getElementById('modalTitle').textContent=title;
+  let h=`<table class="w-full text-xs text-left"><thead><tr class="border-b text-slate-500">
+    <th class="py-1 pr-2">Status</th><th class="py-1 pr-2">Case</th><th class="py-1 pr-2">Device</th><th class="py-1">Scenario</th></tr></thead><tbody>`;
+  rows.forEach(s=>{h+=`<tr class="border-b border-slate-100"><td class="py-1 pr-2">${s.is_pass?'<span class="badge b-pass">Pass</span>':'<span class="badge b-fail">Fail</span>'}</td>
+    <td class="py-1 pr-2">${esc(s.case_key)}</td><td class="py-1 pr-2">${esc(s.host_display)}</td><td class="py-1">${esc(s.scenario)}</td></tr>`;});
+  document.getElementById('modalBody').innerHTML=h+'</tbody></table>';
+  document.getElementById('modal').classList.add('show');
+}
+function closeModal(){document.getElementById('modal').classList.remove('show');}
+document.getElementById('modal').addEventListener('click',e=>{if(e.target.id==='modal')closeModal();});
+
+/* ---------------- Extra panels ---------------- */
+function simpleTable(cols, rows){
+  let h=`<table class="w-full text-left text-sm"><thead><tr class="text-slate-600 border-b border-slate-200">${cols.map(c=>`<th class="px-3 py-2">${esc(c)}</th>`).join('')}</tr></thead><tbody>`;
+  rows.forEach(r=>{h+=`<tr class="zebra border-b border-slate-100">${r.map(c=>`<td class="px-3 py-1.5">${c}</td>`).join('')}</tr>`;});
+  return h+'</tbody></table>';
+}
+function initExtra(){
+  document.getElementById('inconsistTable').innerHTML = DATA.inconsistent.length?
+    simpleTable(['Case','跨机判定'], DATA.inconsistent.map(r=>[
+      r.jira_url?`<a href="${esc(r.jira_url)}" target="_blank" class="drill">${esc(r.case_key)} ↗</a>`:esc(r.case_key),
+      Object.entries(r.hosts).map(([h,v])=>`${esc(h)}:<span class="${v==='Pass'?'text-green-600':'text-red-600'} font-medium">${v}</span>`).join('&nbsp; ')
+    ])):'<p class="text-slate-400 text-sm">无跨机不一致 case</p>';
+
+  document.getElementById('topDurTable').innerHTML=simpleTable(['Case','Device','Scenario','耗时(ms)'],
+    DATA.top_duration.map(r=>[esc(r.case_key),esc(r.host_display),esc(r.scenario),r.duration_ms]));
+  document.getElementById('topRetryTable').innerHTML=simpleTable(['Case','Device','Scenario','重试'],
+    DATA.top_retries.map(r=>[esc(r.case_key),esc(r.host_display),esc(r.scenario),r.retries_count]));
+
+  const mx=DATA.matrix;
+  let mh=`<table class="text-xs border-collapse"><thead><tr><th class="px-2 py-1 bg-slate-50 sticky left-0">host\\owner</th>${mx.owners.map(o=>`<th class="px-2 py-1 bg-slate-50">${esc(o)}</th>`).join('')}</tr></thead><tbody>`;
+  mx.hosts.forEach(h=>{mh+=`<tr><td class="px-2 py-1 font-medium bg-slate-50 sticky left-0">${esc(h)}</td>`+
+    mx.owners.map(o=>{const c=mx.cells[h+'||'+o]; if(!c)return '<td class="px-2 py-1 text-slate-300">·</td>';
+      return `<td class="px-2 py-1" style="background:${rateColor(c.pass_rate)}1A">${c.pass}/${c.total}</td>`;}).join('')+'</tr>';});
+  document.getElementById('matrixTable').innerHTML=mh+'</tbody></table>';
+
+  document.getElementById('keySrcTable').innerHTML=simpleTable(['来源','数量'],
+    Object.entries(DATA.key_source_dist).map(([k,v])=>[esc(k),v]));
+  document.getElementById('unlinkedTable').innerHTML=DATA.unlinked.length?
+    simpleTable(['Scenario','Device'],DATA.unlinked.map(r=>[esc(r.scenario),esc(r.host_display)])):
+    '<p class="text-slate-400 text-sm">无 UNLINKED（全部 case key 命中）</p>';
+}
+
+/* ---------------- Boot ---------------- */
+initHeader(); initCards(); initCharts(); initFilters(); renderCaseTable();
+initSummary('casesum','casesumSub','casesumTable','case_summary');
+initSummary('stepsum','stepsumSub','stepsumTable','scenario_summary');
+initExtra();
+</script>
+</body>
+</html>
