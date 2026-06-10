@@ -32,25 +32,25 @@ def write(analysis, reconcile_result, out_dir):
     L.append("")
     L.append("| 粒度 | Total | Pass | Fail | Pass Rate |")
     L.append("|---|---|---|---|---|")
-    L.append("| Scenario（每条记录=1 scenario × 1 host） | %d | %d | %d | %s |" % (
+    L.append("| scenario 总数（每条记录=1 scenario × 1 device） | %d | %d | %d | %s |" % (
         ov["scenario"]["total"], ov["scenario"]["pass"], ov["scenario"]["fail"], _pct(ov["scenario"]["pass_rate"])))
-    L.append("| Case（每条记录=1 case × 1 host） | %d | %d | %d | %s |" % (
+    L.append("| case 总数（每条记录=1 case × 1 device） | %d | %d | %d | %s |" % (
         ov["case"]["total"], ov["case"]["pass"], ov["case"]["fail"], _pct(ov["case"]["pass_rate"])))
     uc = ov.get("unique_case")
     if uc:
-        L.append("| 唯一 Case 数（去重，仅参考） | %d | %d | %d | %s |" % (
+        L.append("| unique case 数（去重，仅参考） | %d | %d | %d | %s |" % (
             uc["total"], uc["pass"], uc["fail"], _pct(uc["pass_rate"])))
     L.append("")
     L.append("> 状态口径：not_passed = failed + broken，对外仅 Pass / Fail。原始分布：%s" %
              ", ".join("%s=%d" % (k, v) for k, v in ov["status_breakdown"].items()))
-    L.append("> 计数口径：**Case 视图按 (case, host) 行计数** —— 同一条 case 在 N 台机器上跑就贡献 N 条记录。")
+    L.append("> 计数口径：**case 总数按 (case, device) 行计数** —— 同一条 case 在 N 台机器上跑就贡献 N 条记录。")
     L.append("")
 
-    L.append("## Case Result Summary（按 (case, host) 行）")
+    L.append("## Case Result Summary（按 case 总数 = (case, device) 行）")
     L.append("")
     L += _summary_md("按 Owner", analysis["case_summary"]["owner"], "Owner")
     L += _summary_md("按 Component（来自 parentSuite，单一归属）", analysis["case_summary"]["component"], "Component")
-    L += _summary_md("按 Device（host）", analysis["case_summary"]["device"], "Device")
+    L += _summary_md("按 Device", analysis["case_summary"]["device"], "Device")
 
     L.append("## Step Result Summary（按 scenario 记录）")
     L.append("")
@@ -59,7 +59,7 @@ def write(analysis, reconcile_result, out_dir):
     L += _summary_md("按 Device", analysis["scenario_summary"]["device"], "Device")
 
     if analysis["inconsistent"]:
-        L.append("## 跨机结果不一致的 Case（%d）" % len(analysis["inconsistent"]))
+        L.append("## 跨 device 结果不一致的 Case（%d）" % len(analysis["inconsistent"]))
         L.append("")
         for r in analysis["inconsistent"]:
             hv = "; ".join("%s=%s" % (h, v) for h, v in r["hosts"].items())

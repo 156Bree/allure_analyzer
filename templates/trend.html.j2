@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>趋势分析 · 分析龙虾</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --primary:#2563EB; --primary-dark:#1E40AF; --primary-light:#3B82F6;
+    --bg:#F8FAFC; --card:#FFFFFF; --text:#0F172A; --muted:#64748B;
+    --green:#16A34A; --red:#DC2626; --amber:#F59E0B; --slate:#94A3B8;
+  }
+  *{font-family:Roboto,-apple-system,"Segoe UI","PingFang SC",sans-serif;}
+  body{background:var(--bg);color:var(--text);font-size:13px;}
+  .card{background:var(--card);border-radius:12px;box-shadow:0 4px 12px -4px rgba(15,23,42,.08);}
+  .tab-btn{transition:all .2s ease;}
+  .tab-btn.active{background:var(--primary);color:#fff;box-shadow:0 6px 16px -6px rgba(37,99,235,.6);}
+  .pill{display:inline-block;padding:2px 10px;border-radius:9999px;font-weight:600;font-size:11px;}
+  .p-good{background:#DCFCE7;color:#166534;}
+  .p-warn{background:#FEF3C7;color:#92400E;}
+  .p-bad{background:#FEE2E2;color:#991B1B;}
+  table tbody tr:hover{background:#EFF6FF;}
+  .zebra:nth-child(even){background:#F8FAFC;}
+  ::-webkit-scrollbar{height:9px;width:9px;}
+  ::-webkit-scrollbar-thumb{background:#CBD5E1;border-radius:9999px;}
+
+  /* tooltip on info icon */
+  .info-ico{display:inline-flex;align-items:center;justify-content:center;
+    width:14px;height:14px;border-radius:9999px;background:#CBD5E1;color:#fff;
+    font-size:10px;font-weight:700;cursor:help;margin-left:4px;
+    transition:background .15s ease;}
+  .info-ico:hover{background:var(--primary);}
+  .info-wrap{position:relative;display:inline-flex;align-items:center;}
+  .info-wrap .tip{
+    visibility:hidden;opacity:0;transition:opacity .15s ease, visibility 0s linear .15s;
+    position:absolute;z-index:30;top:calc(100% + 6px);left:0;
+    background:#0F172A;color:#fff;padding:8px 10px;border-radius:8px;
+    font-size:11px;line-height:1.55;white-space:pre-line;
+    box-shadow:0 8px 24px -6px rgba(0,0,0,.35);
+    max-width:340px;min-width:200px;pointer-events:none;
+  }
+  .info-wrap:hover .tip{visibility:visible;opacity:1;transition-delay:0s;}
+
+  /* 自定义多选下拉 */
+  .ms-wrap{position:relative;display:inline-block;}
+  .ms-btn{padding:4px 10px;border:1px solid #CBD5E1;border-radius:6px;background:#fff;
+    font-size:11px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+    transition:border-color .15s ease;}
+  .ms-btn:hover{border-color:var(--primary);}
+  .ms-btn .caret{font-size:9px;color:#64748B;}
+  .ms-panel{display:none;position:absolute;z-index:40;top:calc(100% + 4px);right:0;
+    background:#fff;border:1px solid #E2E8F0;border-radius:8px;
+    box-shadow:0 12px 28px -8px rgba(15,23,42,.18);
+    min-width:240px;max-width:340px;padding:6px;}
+  .ms-panel.open{display:block;}
+  .ms-toolbar{display:flex;justify-content:space-between;gap:6px;
+    padding:4px 6px;border-bottom:1px solid #F1F5F9;margin-bottom:4px;}
+  .ms-toolbar button{font-size:11px;color:var(--primary);cursor:pointer;background:none;border:0;}
+  .ms-toolbar button:hover{text-decoration:underline;}
+  .ms-list{max-height:280px;overflow:auto;}
+  .ms-item{display:flex;align-items:center;gap:6px;padding:4px 8px;
+    font-size:11px;border-radius:4px;cursor:pointer;}
+  .ms-item:hover{background:#F1F5F9;}
+  .ms-item input{margin:0;cursor:pointer;}
+  .ms-item .lbl{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .ms-item .cnt{color:#94A3B8;font-size:10px;}
+
+  a.daily-link{color:var(--primary);font-weight:600;text-decoration:none;}
+  a.daily-link:hover{text-decoration:underline;}
+</style>
+</head>
+<body class="min-h-screen">
+
+<header class="bg-gradient-to-r from-[#1E40AF] via-[#2563EB] to-[#3B82F6] text-white shadow-lg">
+  <div class="max-w-[1400px] mx-auto px-6 py-5 flex flex-wrap items-center gap-4 justify-between">
+    <div>
+      <h1 class="text-2xl font-semibold flex items-center gap-2">📈 趋势分析 <span class="text-base font-normal opacity-80">分析龙虾 · Trend</span></h1>
+      <div id="metaLine" class="text-sm opacity-90 mt-1"></div>
+    </div>
+    <div class="flex items-center gap-2">
+      <button class="tab-btn active px-4 py-2 rounded-lg bg-white/15 text-sm font-semibold" data-window="7d">最近 7 天</button>
+      <button class="tab-btn px-4 py-2 rounded-lg bg-white/15 text-sm font-semibold" data-window="30d">最近 30 天</button>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-[1400px] mx-auto px-6 py-6 space-y-6">
+
+  <!-- ============ 每日明细（置顶） ============ -->
+  <section class="card p-4">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="font-semibold text-base flex items-center">
+        每日明细
+        <span class="info-wrap">
+          <span class="info-ico" aria-label="info">i</span>
+          <span class="tip">每天一行；日期为超链接，点击跳转到当天的完整分析报告。
+窗口切换会改变这里展示的天数（7d / 30d）。</span>
+        </span>
+      </h2>
+      <span class="text-xs text-slate-500" id="dailyCountHint"></span>
+    </div>
+    <div class="overflow-auto">
+      <table class="min-w-full text-xs">
+        <thead class="bg-slate-100">
+          <tr>
+            <th class="px-3 py-2 text-left">日期</th>
+            <th class="px-3 py-2 text-right">scenario 通过率</th>
+            <th class="px-3 py-2 text-right">case 通过率</th>
+            <th class="px-3 py-2 text-right">unique case 通过率</th>
+            <th class="px-3 py-2 text-right">device 数</th>
+            <th class="px-3 py-2 text-right">scenario 总数</th>
+            <th class="px-3 py-2 text-right">case 总数</th>
+            <th class="px-3 py-2 text-right">跨机不一致</th>
+            <th class="px-3 py-2 text-right">新增/修复/回归</th>
+          </tr>
+        </thead>
+        <tbody id="dailyTable"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ 概览卡片（窗口聚合） ============ -->
+  <section>
+    <div class="text-xs text-slate-500 mb-2 flex items-center">
+      <span id="summaryHeading">窗口聚合（最近 N 天）</span>
+      <span class="info-wrap">
+        <span class="info-ico" aria-label="info">i</span>
+        <span class="tip">下面 6 张卡片均按"当前选中窗口"内的数据计算（不只是最新一天）。
+切换 7d / 30d 时数值会变化。</span>
+      </span>
+    </div>
+    <div id="cards" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3"></div>
+  </section>
+
+  <!-- ============ 图表网格 ============ -->
+  <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="card p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold text-base flex items-center">
+          整体通过率
+          <span class="info-wrap">
+            <span class="info-ico" aria-label="info">i</span>
+            <span class="tip">三条曲线对应三种统计口径：
+• scenario：每条 scenario 记录是 1 个统计单元
+• case：每个 (case, device) 行是 1 个单元（该 case 在该 device 全 pass 才算 Pass）
+• unique case：每个 case_key 全局判定（任一 device 失败即 Fail）
+
+理论上 unique case ≤ case ≤ scenario。</span>
+          </span>
+        </h2>
+        <span class="text-xs text-slate-500">scenario / case / unique case</span>
+      </div>
+      <div class="h-72"><canvas id="chartOverall"></canvas></div>
+    </div>
+
+    <div class="card p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold text-base flex items-center">
+          报告体量
+          <span class="info-wrap">
+            <span class="info-ico" aria-label="info">i</span>
+            <span class="tip">反映每天报告规模本身的变化：
+• scenario 总数：当天所有 (scenario × device) 记录条数
+• case 总数：当天所有 (case × device) 行数
+• unique case：当天独立 case_key 数
+• device 数：当天参与执行的机器数</span>
+          </span>
+        </h2>
+        <span class="text-xs text-slate-500">scenario / case / unique case / device</span>
+      </div>
+      <div class="h-72"><canvas id="chartVolume"></canvas></div>
+    </div>
+
+    <div class="card p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold text-base flex items-center">
+          按 Owner 通过率
+          <span class="info-wrap">
+            <span class="info-ico" aria-label="info">i</span>
+            <span class="tip">按 case 总数（即 (case, device) 行）口径，按 owner 分组的每日通过率。
+默认显示窗口内累计 case 数最多的前 8 位；点右上角"显示 Owner"可自定义。
+当某天某 owner 没有 case 时该点为空（曲线断开）。</span>
+          </span>
+        </h2>
+        <div class="ms-wrap" data-dim="owner"></div>
+      </div>
+      <div class="h-80"><canvas id="chartOwner"></canvas></div>
+    </div>
+
+    <div class="card p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold text-base flex items-center">
+          按 Component 通过率
+          <span class="info-wrap">
+            <span class="info-ico" aria-label="info">i</span>
+            <span class="tip">按 case 总数口径，按 component 分组的每日通过率。
+component 来自 parentSuite 映射，**单一归属**（求和=总数）。
+默认显示窗口内累计 case 数最多的前 8 项。</span>
+          </span>
+        </h2>
+        <div class="ms-wrap" data-dim="component"></div>
+      </div>
+      <div class="h-80"><canvas id="chartComponent"></canvas></div>
+    </div>
+
+    <div class="card p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold text-base flex items-center">
+          按 Device 通过率
+          <span class="info-wrap">
+            <span class="info-ico" aria-label="info">i</span>
+            <span class="tip">按 case 总数口径，按 device(机器) 分组的每日通过率。
+默认显示窗口内累计 case 数最多的前 8 台 device；可在右上角下拉自定义。
+新机器在加入当天起出现，下线机器只是在那天起为空（曲线断开）。</span>
+          </span>
+        </h2>
+        <div class="ms-wrap" data-dim="device"></div>
+      </div>
+      <div class="h-80"><canvas id="chartDevice"></canvas></div>
+    </div>
+
+    <div class="card p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold text-base flex items-center">
+          Case 状态流转（相对前一日）
+          <span class="info-wrap">
+            <span class="info-ico" aria-label="info">i</span>
+            <span class="tip">基于 unique case 全局判定，与前一天对比：
+• 新增通过：今天首次出现且 Pass
+• 新增失败：今天首次出现且 Fail
+• 修复：昨天 Fail，今天 Pass
+• 回归：昨天 Pass，今天 Fail
+• 移除：昨天有，今天没了
+窗口的第一天没有"前一天"参照，全部为 0。</span>
+          </span>
+        </h2>
+        <span class="text-xs text-slate-500">新增 / 修复 / 回归 / 移除</span>
+      </div>
+      <div class="h-80"><canvas id="chartChurn"></canvas></div>
+    </div>
+  </section>
+
+  <footer class="text-center text-xs text-slate-500 py-4">
+    <span id="footerText"></span>
+  </footer>
+</main>
+
+<script id="trend-data" type="application/json">__TREND_JSON__</script>
+<script>
+(function(){
+  const PAYLOAD = JSON.parse(document.getElementById('trend-data').textContent);
+  const AGG = PAYLOAD.agg;
+  const DAILY_REL = (PAYLOAD.daily_report_rel || '').replace(/\\/g, '/');
+  const THR = AGG.thresholds || {};
+  const GOOD = typeof THR.pass_rate_good === 'number' ? THR.pass_rate_good : 0.90;
+  const WARN = typeof THR.pass_rate_warn === 'number' ? THR.pass_rate_warn : 0.70;
+
+  Chart.defaults.font.size = 11;
+  Chart.defaults.color = '#0F172A';
+
+  let currentWindow = '7d';
+  const charts = {};
+  // 每个维度的"已选 buckets"状态，缓存 dim -> Set<bucket>
+  const dimSelections = {owner:null, component:null, device:null};
+  const TOPN_DEFAULT = 8;
+
+  function pillClass(rate){
+    if (rate == null) return 'pill';
+    if (rate >= GOOD) return 'pill p-good';
+    if (rate >= WARN) return 'pill p-warn';
+    return 'pill p-bad';
+  }
+  function pct(r){ return r == null ? '-' : (r*100).toFixed(2) + '%'; }
+  function escapeHtml(s){
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+      ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  function dailyLink(date){
+    if (!DAILY_REL) return null;
+    return DAILY_REL.replace(/\/+$/, '') + '/' + date + '/report.html';
+  }
+
+  // --- 头部 meta
+  const dates = AGG.available_dates || [];
+  document.getElementById('metaLine').textContent =
+    '快照覆盖：' + (dates.length ? (dates[0] + ' ~ ' + dates[dates.length-1]) : '-')
+    + ' · 共 ' + dates.length + ' 天 · 生成于 ' + (PAYLOAD.generated_at || '-');
+  document.getElementById('footerText').textContent =
+    '数据源：每日快照（snapshots/*.json）· 阈值：good ≥ ' + (GOOD*100).toFixed(0) + '%，warn ≥ ' + (WARN*100).toFixed(0) + '%';
+
+  // --- 概览卡片：窗口聚合
+  function renderCards(){
+    const w = AGG.windows[currentWindow];
+    const sm = w.summary || {};
+    document.getElementById('summaryHeading').textContent =
+      '窗口聚合（最近 ' + (sm.actual_days || 0) + ' 天，' +
+      (sm.first_date || '-') + ' ~ ' + (sm.latest_date || '-') + '）';
+
+    const cards = [
+      {
+        title: 'scenario 平均通过率',
+        valueHtml: '<span class="' + pillClass(sm.scenario_avg_pass_rate) + ' text-base !px-3 !py-1">'
+                   + pct(sm.scenario_avg_pass_rate) + '</span>',
+        tip: '窗口内每天 scenario 通过率的算术平均。'
+      },
+      {
+        title: 'case 平均通过率',
+        valueHtml: '<span class="' + pillClass(sm.case_avg_pass_rate) + ' text-base !px-3 !py-1">'
+                   + pct(sm.case_avg_pass_rate) + '</span>',
+        tip: '窗口内每天 case 通过率（按 (case, device) 行）的算术平均。'
+      },
+      {
+        title: 'unique case 最低通过率',
+        valueHtml: (function(){
+          if (!sm.unique_case_min) return '<span class="pill text-base !px-3 !py-1">-</span>';
+          const rate = sm.unique_case_min.rate, d = sm.unique_case_min.date;
+          return '<span class="' + pillClass(rate) + ' text-base !px-3 !py-1">' + pct(rate)
+            + '</span><span class="text-xs ml-2 text-slate-500">' + escapeHtml(d) + '</span>';
+        })(),
+        tip: 'unique case 通过率在窗口内最差的那一天（数值与日期）。\n对应"哪天最痛"。'
+      },
+      {
+        title: '累计修复 case',
+        valueHtml: '<span class="text-base font-bold text-emerald-600">' + (sm.churn_total_fixed || 0) + '</span>',
+        tip: '窗口内"昨天 Fail → 今天 Pass"事件累计次数（按 unique case 计）。'
+      },
+      {
+        title: '累计回归 case',
+        valueHtml: '<span class="text-base font-bold text-rose-600">' + (sm.churn_total_regressed || 0) + '</span>',
+        tip: '窗口内"昨天 Pass → 今天 Fail"事件累计次数（按 unique case 计）。\n该数字越高说明稳定性越差。'
+      },
+      {
+        title: '跨 device 不一致 case · 最新',
+        valueHtml: '<span class="text-base font-bold">' + (sm.latest_inconsistent_cases ?? '-') + '</span>',
+        tip: '最新一天有多少个 case 在不同 device 上结论打架（有的 Pass 有的 Fail）。\n这一项展示当前水位，不取窗口平均。'
+      },
+    ];
+
+    document.getElementById('cards').innerHTML = cards.map(c => (
+      '<div class="card p-4">'
+        + '<div class="text-xs text-slate-500 mb-1 flex items-center">' + escapeHtml(c.title)
+          + '<span class="info-wrap"><span class="info-ico">i</span><span class="tip">'
+          + escapeHtml(c.tip) + '</span></span>'
+        + '</div>'
+        + '<div class="flex items-baseline">' + c.valueHtml + '</div>'
+      + '</div>'
+    )).join('');
+  }
+
+  // --- 颜色调色板
+  const PALETTE = ['#2563EB','#16A34A','#DC2626','#F59E0B','#7C3AED','#0891B2',
+                   '#DB2777','#65A30D','#EA580C','#0EA5E9','#9333EA','#14B8A6',
+                   '#E11D48','#84CC16','#F97316','#6366F1'];
+  function colorOf(i){ return PALETTE[i % PALETTE.length]; }
+
+  function destroy(name){ if (charts[name]) { charts[name].destroy(); delete charts[name]; } }
+
+  function lineCfg(labels, datasets, opts){
+    return {
+      type:'line',
+      data:{labels, datasets},
+      options:Object.assign({
+        responsive:true,
+        maintainAspectRatio:false,
+        interaction:{mode:'index', intersect:false},
+        plugins:{
+          legend:{position:'bottom', labels:{boxWidth:10, padding:8}},
+          tooltip:{
+            callbacks:{
+              label:(ctx)=>{
+                const v = ctx.parsed.y;
+                if (v == null) return ctx.dataset.label + ': -';
+                return ctx.dataset.label + ': ' + (opts && opts.pct ? (v*100).toFixed(2)+'%' : v);
+              }
+            }
+          }
+        },
+        scales:{
+          y: opts && opts.pct
+            ? {min:0, max:1, ticks:{callback:v=>(v*100).toFixed(0)+'%'}}
+            : {beginAtZero:true}
+        }
+      }, (opts && opts.options) || {})
+    };
+  }
+
+  function renderOverall(){
+    const w = AGG.windows[currentWindow];
+    const ov = w.overview;
+    destroy('overall');
+    charts.overall = new Chart(document.getElementById('chartOverall'), lineCfg(
+      ov.dates,
+      [
+        {label:'scenario',     data:ov.scenario_pass_rate,     borderColor:'#2563EB', backgroundColor:'#2563EB22', tension:.25, spanGaps:true},
+        {label:'case',         data:ov.case_pass_rate,         borderColor:'#16A34A', backgroundColor:'#16A34A22', tension:.25, spanGaps:true},
+        {label:'unique case',  data:ov.unique_case_pass_rate,  borderColor:'#F59E0B', backgroundColor:'#F59E0B22', tension:.25, spanGaps:true},
+      ],
+      {pct:true}
+    ));
+  }
+
+  function renderVolume(){
+    const w = AGG.windows[currentWindow];
+    const ov = w.overview;
+    destroy('volume');
+    charts.volume = new Chart(document.getElementById('chartVolume'), lineCfg(
+      ov.dates,
+      [
+        {label:'scenario 总数',  data:ov.scenario_total,    borderColor:'#2563EB', tension:.25},
+        {label:'case 总数',      data:ov.case_total,        borderColor:'#16A34A', tension:.25},
+        {label:'unique case',    data:ov.unique_case_total, borderColor:'#7C3AED', tension:.25},
+        {label:'device 数',      data:ov.hosts,             borderColor:'#F59E0B', tension:.25},
+      ],
+      {pct:false}
+    ));
+  }
+
+  // --- 维度选择器（多选下拉）
+  function defaultTopBuckets(dim){
+    const dimData = AGG.windows[currentWindow][dim];
+    const buckets = (dimData.buckets || []).slice();
+    const score = (b) => (dimData.total[b] || []).reduce((a,c)=>a+(c||0),0);
+    return buckets.sort((a,b)=>score(b)-score(a)).slice(0, TOPN_DEFAULT);
+  }
+
+  function ensureSelection(dim){
+    const dimData = AGG.windows[currentWindow][dim];
+    const allBuckets = new Set(dimData.buckets || []);
+    let sel = dimSelections[dim];
+    if (!sel) {
+      // 初始化为 Top-N
+      sel = new Set(defaultTopBuckets(dim));
+      dimSelections[dim] = sel;
+    } else {
+      // 切换窗口时清除已不存在的 bucket（避免脏选择导致空图）
+      for (const x of Array.from(sel)) {
+        if (!allBuckets.has(x)) sel.delete(x);
+      }
+      if (sel.size === 0 && allBuckets.size) {
+        // 窗口切换后没有交集，回退到 Top-N
+        sel = new Set(defaultTopBuckets(dim));
+        dimSelections[dim] = sel;
+      }
+    }
+    return sel;
+  }
+
+  function renderDimChart(dim){
+    const canvasId = 'chart' + dim.charAt(0).toUpperCase() + dim.slice(1);
+    const dimData = AGG.windows[currentWindow][dim];
+    const sel = ensureSelection(dim);
+    const buckets = (dimData.buckets || []).filter(b => sel.has(b));
+    const datasets = buckets.map((b, i) => ({
+      label: b,
+      data: dimData.pass_rate[b],
+      borderColor: colorOf(i),
+      backgroundColor: colorOf(i)+'22',
+      tension:.25,
+      spanGaps:true,
+    }));
+    destroy(dim);
+    charts[dim] = new Chart(document.getElementById(canvasId),
+      lineCfg(dimData.dates, datasets, {pct:true}));
+  }
+
+  function renderDimSelector(dim){
+    const wrap = document.querySelector('.ms-wrap[data-dim="' + dim + '"]');
+    if (!wrap) return;
+    const dimData = AGG.windows[currentWindow][dim];
+    const buckets = (dimData.buckets || []).slice();
+    const sel = ensureSelection(dim);
+    const score = (b) => (dimData.total[b] || []).reduce((a,c)=>a+(c||0),0);
+    buckets.sort((a,b) => score(b) - score(a));
+
+    const dimLabel = dim === 'owner' ? 'Owner' : (dim === 'component' ? 'Component' : 'Device');
+    wrap.innerHTML =
+      '<button class="ms-btn" type="button">'
+        + '<span class="lbl">显示 ' + dimLabel + '：' + sel.size + '/' + buckets.length + '</span>'
+        + '<span class="caret">▼</span>'
+      + '</button>'
+      + '<div class="ms-panel">'
+        + '<div class="ms-toolbar">'
+          + '<button data-act="all">全选</button>'
+          + '<button data-act="none">全不选</button>'
+          + '<button data-act="top">默认 Top ' + TOPN_DEFAULT + '</button>'
+        + '</div>'
+        + '<div class="ms-list">'
+          + buckets.map(b => {
+              const checked = sel.has(b) ? 'checked' : '';
+              return '<label class="ms-item">'
+                + '<input type="checkbox" ' + checked + ' data-bucket="' + escapeHtml(b) + '">'
+                + '<span class="lbl" title="' + escapeHtml(b) + '">' + escapeHtml(b) + '</span>'
+                + '<span class="cnt">case ' + score(b) + '</span>'
+              + '</label>';
+            }).join('')
+        + '</div>'
+      + '</div>';
+
+    const btn = wrap.querySelector('.ms-btn');
+    const panel = wrap.querySelector('.ms-panel');
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // 关掉其他面板
+      document.querySelectorAll('.ms-panel.open').forEach(p => { if (p !== panel) p.classList.remove('open'); });
+      panel.classList.toggle('open');
+    });
+    wrap.addEventListener('click', (e) => e.stopPropagation());
+
+    panel.querySelectorAll('input[type=checkbox]').forEach(input => {
+      input.addEventListener('change', () => {
+        const b = input.getAttribute('data-bucket');
+        if (input.checked) sel.add(b); else sel.delete(b);
+        btn.querySelector('.lbl').textContent =
+          '显示 ' + dimLabel + '：' + sel.size + '/' + buckets.length;
+        renderDimChart(dim);
+      });
+    });
+    panel.querySelectorAll('.ms-toolbar button').forEach(b => {
+      b.addEventListener('click', () => {
+        const act = b.getAttribute('data-act');
+        if (act === 'all') {
+          sel.clear(); buckets.forEach(x => sel.add(x));
+        } else if (act === 'none') {
+          sel.clear();
+        } else if (act === 'top') {
+          sel.clear(); defaultTopBuckets(dim).forEach(x => sel.add(x));
+        }
+        renderDimSelector(dim);
+        renderDimChart(dim);
+      });
+    });
+  }
+
+  function renderChurn(){
+    const w = AGG.windows[currentWindow];
+    const c = w.churn;
+    destroy('churn');
+    charts.churn = new Chart(document.getElementById('chartChurn'), {
+      type:'bar',
+      data:{
+        labels: c.dates,
+        datasets:[
+          {label:'新增通过', data:c.new_pass,  backgroundColor:'#16A34A'},
+          {label:'新增失败', data:c.new_fail,  backgroundColor:'#94A3B8'},
+          {label:'修复',     data:c.fixed,     backgroundColor:'#2563EB'},
+          {label:'回归',     data:c.regressed, backgroundColor:'#DC2626'},
+          {label:'移除',     data:c.dropped,   backgroundColor:'#F59E0B'},
+        ]
+      },
+      options:{
+        responsive:true,
+        maintainAspectRatio:false,
+        plugins:{legend:{position:'bottom', labels:{boxWidth:10, padding:8}}},
+        scales:{x:{stacked:true}, y:{stacked:true, beginAtZero:true}}
+      }
+    });
+  }
+
+  function renderTable(){
+    const w = AGG.windows[currentWindow];
+    const ov = w.overview;
+    const c = w.churn;
+    document.getElementById('dailyCountHint').textContent =
+      '当前窗口：' + ov.dates.length + ' 天 · 最新在最上';
+    // 表格渲染：最新日期在最上面（数组本身按日期升序，这里渲染时反转）
+    const rows = ov.dates.map((d, i) => {
+      const sr = ov.scenario_pass_rate[i], cr = ov.case_pass_rate[i], ur = ov.unique_case_pass_rate[i];
+      const link = dailyLink(d);
+      const dateCell = link
+        ? '<a class="daily-link" href="' + link + '" target="_blank" rel="noopener">' + d + ' ↗</a>'
+        : d;
+      return '<tr class="zebra">'
+        + '<td class="px-3 py-2">' + dateCell + '</td>'
+        + '<td class="px-3 py-2 text-right"><span class="' + pillClass(sr) + '">' + pct(sr) + '</span></td>'
+        + '<td class="px-3 py-2 text-right"><span class="' + pillClass(cr) + '">' + pct(cr) + '</span></td>'
+        + '<td class="px-3 py-2 text-right"><span class="' + pillClass(ur) + '">' + pct(ur) + '</span></td>'
+        + '<td class="px-3 py-2 text-right">' + (ov.hosts[i] ?? '-') + '</td>'
+        + '<td class="px-3 py-2 text-right">' + (ov.scenario_total[i] ?? '-') + '</td>'
+        + '<td class="px-3 py-2 text-right">' + (ov.case_total[i] ?? '-') + '</td>'
+        + '<td class="px-3 py-2 text-right">' + (ov.inconsistent_cases[i] ?? '-') + '</td>'
+        + '<td class="px-3 py-2 text-right text-xs">'
+          + '<span class="text-emerald-600">+' + (c.new_pass[i]||0) + '</span> / '
+          + '<span class="text-blue-600">' + (c.fixed[i]||0) + '</span> / '
+          + '<span class="text-rose-600">' + (c.regressed[i]||0) + '</span>'
+        + '</td>'
+        + '</tr>';
+    }).reverse().join('');
+    document.getElementById('dailyTable').innerHTML = rows
+      || '<tr><td colspan="9" class="px-3 py-4 text-center text-slate-400">无数据</td></tr>';
+  }
+
+  function renderAll(){
+    renderTable();
+    renderCards();
+    renderOverall();
+    renderVolume();
+    ['owner', 'component', 'device'].forEach(dim => {
+      renderDimSelector(dim);
+      renderDimChart(dim);
+    });
+    renderChurn();
+  }
+
+  // tab 切换
+  document.querySelectorAll('[data-window]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('[data-window]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentWindow = btn.dataset.window;
+      // 切窗口时重置维度选择，避免上窗口的"全不选"残留
+      Object.keys(dimSelections).forEach(k => dimSelections[k] = null);
+      renderAll();
+    });
+  });
+
+  // 全局点击关闭下拉
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.ms-panel.open').forEach(p => p.classList.remove('open'));
+  });
+
+  renderAll();
+})();
+</script>
+</body>
+</html>

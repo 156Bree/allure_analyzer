@@ -22,6 +22,8 @@ from analyzer.classify import Classifier
 from analyzer.metrics import build_analysis
 from analyzer.reconcile import reconcile
 from analyzer.reporters import csv_reporter, excel_reporter, html_reporter, markdown_reporter
+from analyzer import snapshot as snapshot_mod
+from analyzer.locator import normalize_date
 
 
 def _default_report_dir(script_dir):
@@ -37,8 +39,8 @@ def parse_args():
     p = argparse.ArgumentParser(description="Allure 多机合并报告分析工具（分析龙虾）")
     p.add_argument("--report", "-r", default=_default_report_dir(script_dir),
                    help="Allure 报告根目录（含 data/test-cases），默认自动探测脚本上级目录")
-    p.add_argument("--output", "-o", default=os.path.join(os.getcwd(), "allure_analysis_out"),
-                   help="输出目录，默认 ./allure_analysis_out")
+    p.add_argument("--output", "-o", default=os.path.join(os.getcwd(), "out"),
+                   help="输出目录，默认 ./out（日常请使用 run_daily.py，会自动按日期分目录）")
     p.add_argument("--config", "-c", default=os.path.join(script_dir, "config.yaml"),
                    help="配置文件路径，默认脚本目录下 config.yaml（缺 PyYAML 时用内置默认）")
     p.add_argument("--formats", "-f", default="html,csv,excel,md",
@@ -46,6 +48,12 @@ def parse_args():
     p.add_argument("--original-report", default="",
                    help="原始 Allure 报告链接（写入 HTML 顶部 Original Report）")
     p.add_argument("--report-name", default="Allure Report", help="报告显示名")
+    p.add_argument("--snapshot-dir", default="",
+                   help="趋势分析快照目录；若指定，则在分析完成后导出当日快照（YYYY-MM-DD.json）")
+    p.add_argument("--snapshot-date", default="",
+                   help="快照日期标识（YYYY-MM-DD），未指定时尝试从 --report 路径中识别，仍无法识别则使用今天")
+    p.add_argument("--source-fingerprint", default="",
+                   help="（高级）数据源指纹，写入快照供上层增量识别使用；未指定则按 --report 目录现算")
     return p.parse_args()
 
 
@@ -107,6 +115,29 @@ def main():
     if "md" in formats or "markdown" in formats:
         p = markdown_reporter.write(analysis, reconcile_result, out_dir)
         produced.append(os.path.basename(p))
+
+    # 5) 可选：导出趋势快照
+    if args.snapshot_dir:
+        # 推断快照日期：显式参数 > 报告路径里的日期目录 > 今天
+        snap_date = args.snapshot_date.strip()
+        if not snap_date:
+            for part in reversed(report_dir.replace("\\", "/").split("/")):
+                d = normalize_date(part)
+                if d:
+                    snap_date = d
+                    break
+        if not snap_date:
+            snap_date = datetime.date.today().strftime("%Y-%m-%d")
+        snap_dir = os.path.abspath(args.snapshot_dir)
+        fp = (args.source_fingerprint or "").strip()
+        if not fp:
+            fp = snapshot_mod.compute_source_fingerprint(report_dir)
+        _, snap_path = snapshot_mod.export(
+            analysis, snap_date, snap_dir,
+            extra_meta={"source_report_dir": report_dir},
+            source_fingerprint=fp)
+        produced.append("snapshot:%s" % os.path.basename(snap_path))
+        print("[snapshot] 已写出 %s (date=%s, fp=%s)" % (snap_path, snap_date, fp or "-"))
 
     print("=" * 60)
     print("完成。输出目录：%s" % out_dir)

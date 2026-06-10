@@ -65,7 +65,7 @@
       <canvas id="statusChart" height="200"></canvas>
     </div>
     <div class="bg-white rounded-xl shadow-sm p-4">
-      <h3 class="font-medium text-slate-600 mb-2">各机器 Pass Rate (scenario)</h3>
+      <h3 class="font-medium text-slate-600 mb-2">各 device Pass Rate (scenario)</h3>
       <canvas id="hostChart" height="200"></canvas>
     </div>
     <div class="bg-white rounded-xl shadow-sm p-4">
@@ -120,7 +120,7 @@
     <div class="bg-white rounded-xl shadow-sm p-4">
       <div class="flex gap-4 border-b border-slate-200 mb-3" id="casesumSub"></div>
       <div id="casesumTable"></div>
-      <p class="text-xs text-slate-400 mt-2">提示：每行 = (case, device) 计数单位，一条 case 在 N 台机器上跑就贡献 N 条记录。Pass / Fail 数字可点击下钻。Component 来自 parentSuite，单一归属（求和 = 行总数）。</p>
+      <p class="text-xs text-slate-400 mt-2">提示：每行 = (case, device) 计数单位（即 case 总数），一条 case 在 N 台 device 上跑就贡献 N 条记录。Pass / Fail 数字可点击下钻。Component 来自 parentSuite，单一归属（求和 = 行总数）。</p>
     </div>
   </section>
 
@@ -177,7 +177,7 @@
   </div>
 </div>
 
-<footer class="text-center text-slate-400 text-xs py-6">分析龙虾 · Step 视图按 scenario 记录(scenario × host) 计数；Case 视图按 (case × host) 行计数 —— 一条 case 在 N 台机器上跑算 N 条记录。</footer>
+<footer class="text-center text-slate-400 text-xs py-6">分析龙虾 · Step 视图按 scenario 记录(scenario × device) 计数；Case 视图按 case 总数（case × device 行）计数 —— 一条 case 在 N 台 device 上跑算 N 条记录。</footer>
 
 <script id="analysis-data" type="application/json">__ANALYSIS_JSON__</script>
 <script id="reconcile-data" type="application/json">__RECONCILE_JSON__</script>
@@ -194,7 +194,7 @@ function ratePill(r){ const c=rateColor(r); return `<span class="pill" style="ba
 function initHeader(){
   const m = DATA.meta||{};
   document.getElementById('metaLine').innerHTML =
-    `${esc(m.report_name||'Allure Report')} · 生成于 ${esc(m.generated_at||'')} · scenarios ${DATA.counts.scenarios} / case×device 行 ${DATA.counts.cases}（${DATA.counts.unique_cases||DATA.counts.cases} 个唯一 case）`;
+    `${esc(m.report_name||'Allure Report')} · 生成于 ${esc(m.generated_at||'')} · scenarios ${DATA.counts.scenarios} / case 总数 ${DATA.counts.cases}（${DATA.counts.unique_cases||DATA.counts.cases} 个 unique case）`;
   const b = document.getElementById('reconcileBadge');
   b.textContent = `对账 ${RECON.visible_records} visible / ${RECON.records_total} total`;
   b.title = RECON.note || '';
