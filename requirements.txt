@@ -3,3 +3,7 @@
 PyYAML>=5.1     # 读取 config.yaml（缺失则用内置默认配置）
 openpyxl>=3.0   # 导出 Excel 多 sheet（缺失则跳过 xlsx，仍可出 csv）
 Jinja2>=2.11    # HTML 模板渲染（缺失则用内置字符串模板降级，HTML 仍可生成）
+
+# AI 失败分析（analyzer/ai）与本地编辑服务（serve.py）均仅用标准库
+# （urllib / http.server），无需额外安装。仅需把 API key 放进环境变量
+# （默认 OPENAI_API_KEY），并在 config.yaml 的 ai 段设 enabled: true。

@@ -116,11 +116,12 @@ allure_analyzer/
 ├── README.md
 ├── requirements.txt          # PyYAML/openpyxl/jinja2（均可选，缺失自动降级）
 ├── config.yaml               # 可复用配置（口径/白名单/功能词/美化映射/阈值）
-├── analyze.py                # CLI 入口（单份报告分析 + 可选导出趋势快照）
+├── analyze.py                # CLI 入口（单份报告分析 + AI 失败分析 + 可选导出趋势快照）
 ├── trend.py                  # CLI：读快照，聚合 7d/30d 趋势，出 trend.html/csv/md
 ├── run_daily.py              # 一键脚本：定位 → analyze → snapshot → trend
+├── serve.py                  # 本地编辑服务（仅 localhost）：在线改/删 AI 分析 + 吸收进 skill
 ├── analyzer/
-│   ├── config.py             # 配置加载 + 内置默认
+│   ├── config.py             # 配置加载 + 内置默认（含 ai 段）
 │   ├── models.py             # TestCaseRecord 数据模型
 │   ├── loader.py             # 解析全部记录 + (host,historyId) 去重 + 容错
 │   ├── owner.py              # owner 识别（白名单/启发式）
@@ -129,6 +130,11 @@ allure_analyzer/
 │   ├── reconcile.py          # 与 summary.json 对账
 │   ├── locator.py            # 智能定位：日期目录(3 种格式) + allure 报告根 + 多候选阻塞
 │   ├── snapshot.py           # 紧凑每日快照（趋势分析的唯一数据源）
+│   ├── ai/                   # AI 失败分析子包（纯标准库 urllib，缺 key 自动降级）
+│   │   ├── llm_client.py     # OpenAI 兼容 /chat/completions（urllib，超时/重试/JSON 容错）
+│   │   ├── skill_context.py  # 读取 fix-case-error skill 拼 system prompt（learned 最高优先）
+│   │   ├── store.py          # 指纹缓存 store.json：sha1 指纹 + manual/locked 语义 + 原子写
+│   │   └── analyzer.py       # 编排：比对缓存 → 仅新增/变化未锁定项调 LLM → 回填 ai_map
 │   └── reporters/
 │       ├── csv_reporter.py
 │       ├── excel_reporter.py
@@ -141,8 +147,13 @@ allure_analyzer/
     ├── snapshots/            # 每日快照 YYYY-MM-DD.json（几 KB/份，长期保留）
     ├── _unpack_cache/        # 压缩包解压缓存（幂等，可随时整目录删除）
     ├── daily_out/            # 每日详细分析报告（按日期分子目录，可按需归档/清理）
+    ├── ai_analysis/          # AI 分析全局指纹缓存 store.json（跨日期复用，建议保留）
     └── trend_out/            # trend.html / trend.csv / trend.md
 ```
+
+> AI 失败分析的领域知识与人工修正沉淀位于工具目录**外层**的
+> `.codebuddy/skills/fix-case-error/`（`SKILL.md` + `references/learned-corrections.md`），
+> 详见 [§ 9. AI 失败分析](#9-ai-失败分析--人工修正闭环)。
 
 ---
 
@@ -156,11 +167,15 @@ allure_analyzer/
 
 纯标准库即可运行核心分析与 HTML/CSV/Markdown 输出。
 
+> **AI 失败分析无新增强依赖**：LLM 调用走标准库 `urllib`，本地编辑服务走标准库 `http.server`。
+> 未配置 API key、网络/解析失败或 `ai.enabled=false` 时全部**安全降级**——报告与趋势照常产出，
+> AI 列显示「未分析」，详见 [§ 9](#9-ai-失败分析--人工修正闭环)。
+
 ---
 
 ## 7. 后续可扩展（已预留）
 
-- **失败原因归类**：`status_message` 已随记录保留，可在 `classify` 旁加 `failure_classifier.py`，按历史失败标签做关键词/正则归类。
+- **失败原因归类**：已落地为 [§ 9. AI 失败分析](#9-ai-失败分析--人工修正闭环)——对失败 scenario 用大模型产出「结论/原因/建议」，并支持人工修正回写 skill 复用。
 - **每日定时 + 跨报告趋势**：本工具是「报告路径 → 产物」的 CLI，外层用定时任务每天扫描新报告目录、跑分析并聚合趋势即可。
 
 ---
@@ -259,7 +274,7 @@ python3 run_daily.py --inbox /path/to/reports_inbox --force
 - 本次执行情况：分析了哪些日期、跳过了哪些、哪些被阻塞
 - 最新一天 vs 前一日的关键指标变化（通过率涨跌、device 增减、跨机不一致变化）
 - case 状态流转：哪些 case 回归、修复、新增失败（最多列前 10 个）
-- 直达入口：趋势 / 最新日报告路径
+- 直达入口：`python3 serve.py` 统一入口（趋势 + 日报 + AI 分析/编辑）及静态文件路径
 
 加 `--no-briefing` 可关闭。
 
@@ -297,7 +312,10 @@ python3 analyze.py \
 
 ### 8.6 产物速查
 
-- `trend.html`：自包含单文件，浏览器双击打开。
+- 统一入口：在 `allure_analyzer/` 下运行 `python3 serve.py`，打开 `http://127.0.0.1:8765/`。
+  - 首页自动进入趋势页；从趋势页点击日期会在同一端口打开当天完整报告，并共享 `/api/analysis`，AI 分析/编辑正常可用。
+  - 不建议再单独用 `python -m http.server` 开趋势页；静态服务没有 `/api/analysis`，跳到日报后会看不到最新 AI 分析。
+- `trend.html`：自包含单文件，可双击/静态打开查看趋势（只读）。
   - 顶部可切「7d / 30d」窗口，所有图与卡片随之联动。
   - **每日明细表**置顶，"日期"列点击直跳当天的完整分析报告。
   - 概览卡片为**窗口聚合值**（平均通过率、最低通过率及其日期、累计修复/回归 等），与下方明细不重复。
@@ -306,4 +324,89 @@ python3 analyze.py \
 - `trend.csv`：每天一行，含通过率（scenario / case / unique-case）、体量、状态流转 7 项。utf-8-sig，Excel 直接打开不乱码。
 - `trend.md`：日总览表 + 状态流转表，方便贴到日报/周报。
 - `daily_briefing.md`：每次 `run_daily.py` 跑完落盘的「今日值班汇报」，含执行情况 + 当日 vs 前日变化 + case 流转明细，可直接贴到群/邮件。
+
+---
+
+## 9. AI 失败分析 + 人工修正闭环
+
+在每日分析时，对每条**失败 scenario** 调用大模型（OpenAI 兼容接口），依据 `fix-case-error` skill 的领域知识，产出结构化的「**结论 / 原因 / 建议**」，展示到每日报告网页；并提供本地编辑服务，让你在网页里**改 / 删** AI 结论，且把人工修正**沉淀回 skill** 供后续分析复用。
+
+> 全程「**可降级**」：没配 key、网络/解析失败、`ai.enabled=false` 都不会阻断报告生成——AI 列只显示「未分析」。
+
+### 9.1 启用
+
+1. 在 `config.yaml` 的 `ai` 段把 `enabled` 置为 `true`（缺 PyYAML 时改 `analyzer/config.py` 内置默认的 `ai` 段）：
+
+   ```yaml
+   ai:
+     enabled: true
+     base_url: "https://api.openai.com/v1"   # 任意 OpenAI 兼容端点
+     model: "gpt-4o-mini"
+     api_key_env: "OPENAI_API_KEY"           # 从该环境变量读取 key（名字可改）
+     timeout: 30
+     max_retries: 1
+     cache:
+       enabled: true
+       store_path: "trend_data/ai_analysis/store.json"
+     skill:
+       path: "../.codebuddy/skills/fix-case-error"
+       learned_file: "references/learned-corrections.md"
+   ```
+
+2. 把 API key 放进环境变量（**不要写进配置文件或日志**）：
+
+   ```bash
+   export OPENAI_API_KEY="sk-xxxx"
+   ```
+
+3. 照常跑分析即可，AI 分析会在 `build_analysis` 之后、写报告之前自动执行：
+
+   ```bash
+   python3 run_daily.py --inbox /path/to/reports_inbox
+   # 或单份临时分析
+   python3 analyze.py --report /path/to/allure_report --output ./out
+   ```
+
+   控制台会打印一行 AI 状态摘要，如 `status=ok analyzed=3 reused=12 failed=0`。
+
+### 9.2 缓存与成本控制（重要）
+
+- **指纹** = `sha1(case_key | host | scenario | status_message)`，存于 `trend_data/ai_analysis/store.json`（跨日期复用）。
+- 每次分析**只对新增 / 变化（指纹变了）且未被人工锁定**的失败项调用 LLM；命中缓存的直接复用，**不重复花 token**。`status_message` 变了才算「失败内容变化」→ 重新分析。
+- 稳态下（失败集合不变）每日 LLM 调用次数趋近于 0。
+- `source=manual` / `locked=true` 的**人工修正项永不被自动覆盖**。
+
+### 9.3 网页查看
+
+- Case Result 表展开的 scenario 子行新增「**AI 分析**」列：失败行显示 🧠 图标，点击复用弹窗展示**结论 / 原因 / 建议全文**（不截断）；主行状态旁有「🧠 N」角标表示已分析条数。
+- 报告默认是**可双击的单文件**（内嵌分析结果，`file://` 直接看为只读）。
+
+### 9.4 在线编辑 / 删除 / 吸收（`serve.py`）
+
+用本地统一服务打开趋势页和每日报告即可在网页里直接编辑——**仅监听 `127.0.0.1`，不对外暴露**：
+
+```bash
+cd allure_analyzer
+python3 serve.py                          # 推荐：统一入口，打开 trend_data/trend_out/trend.html
+python3 serve.py --date 2026-06-09        # 兼容：只服务 trend_data/daily_out/2026-06-09
+python3 serve.py --dir /path/to/report    # 兼容：显式报告目录
+# 可选：--port 8765  --config config.yaml
+```
+
+打开提示的 `http://127.0.0.1:<port>/` 后，首页会进入趋势页；从趋势页点击日期进入的日报同样会共享 `/api/analysis`。弹窗里会多出操作按钮：
+
+| 操作 | 行为 |
+|---|---|
+| **编辑 → 保存** | 写入 `store.json` 并置 `source=manual` / `locked=true`（之后自动分析永不覆盖），页面即时生效 |
+| **删除** | 从 `store.json` 移除该条，该失败项回到「未分析」 |
+| **吸收进 skill** | 把该条人工修正幂等写入 `.codebuddy/skills/fix-case-error/references/learned-corrections.md`（同一指纹只保留最新一条），**下次分析作为最高优先级上下文复用** |
+
+> serve 模式下网页会 `fetch('/api/analysis')` 拉取最新 `store.json` 叠加覆盖内嵌数据，所以**改完即时可见**；`file://` 直接打开则回退到内嵌结果（只读）。
+
+接口（均仅本机）：`GET /api/analysis` 返回整份 store；`POST /api/analysis`（`action=save|delete`）改删；`POST /api/absorb` 写入 skill。写接口会校验 `fp` 为 40 位 sha1，且只写 `store.json` 与 learned 文件。
+
+### 9.5 skill 与输出规范
+
+- LLM 的 system prompt 由 `fix-case-error` 的 `SKILL.md` + `references/*.md` 拼成，其中 `learned-corrections.md`（人工修正沉淀）置于**最前、最高优先级**。
+- 输出严格为 JSON：`{"conclusion","cause","suggestion"}`；字数约束（结论 ≤20 字 / 原因 ≤80 字 / 建议 ≤80 字）作为 skill 内的**软约束**引导模型自然产出简短结论，后端**不做硬截断**，`store.json` 保存模型原始输出，弹窗展示全文。
 

@@ -99,6 +99,23 @@ def main():
     }
     analysis = build_analysis(records, config, meta)
 
+    # 3.5) AI 失败分析（降级不阻断）：build_analysis 后、reporter 前回填 ai_map/scenario_rows.ai
+    try:
+        from analyzer.ai import run_ai_analysis
+        run_ai_analysis(analysis, config, os.path.dirname(os.path.abspath(__file__)))
+        ai_meta = analysis.get("ai_meta", {})
+        if ai_meta.get("enabled"):
+            print("[ai] 状态=%s 失败=%d 新分析=%d 复用缓存=%d 失败调用=%d" % (
+                ai_meta.get("status"), ai_meta.get("total_failures", 0),
+                ai_meta.get("analyzed", 0), ai_meta.get("reused", 0),
+                ai_meta.get("failed", 0)))
+        else:
+            print("[ai] 已禁用（config.ai.enabled=false）或无可分析项，跳过 LLM 调用。")
+    except Exception as e:  # noqa: BLE001
+        print("[ai][warn] AI 分析模块异常，已降级跳过：%s" % e)
+        analysis.setdefault("ai_map", {})
+        analysis.setdefault("ai_meta", {"enabled": False, "status": "error"})
+
     # 4) 输出
     formats = {x.strip().lower() for x in args.formats.split(",") if x.strip()}
     produced = []

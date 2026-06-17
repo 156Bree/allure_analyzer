@@ -28,6 +28,10 @@ env/
 # 日志
 *.log
 
+# 本地服务运行时文件
+serve_8765.log
+serve_8765.pid
+
 # 分析输出产物（运行时生成，不入库）
 allure_analysis_out/
 out/

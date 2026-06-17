@@ -50,6 +50,24 @@ DEFAULT_CONFIG = {
         "pass_rate_warn": 0.70,
     },
     "top_n": 10,
+    # AI 失败分析（与 config.yaml 的 ai 段等价；缺 PyYAML 时回落到此）
+    "ai": {
+        "enabled": False,
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4o-mini",
+        "api_key": "",
+        "api_key_env": "OPENAI_API_KEY",
+        "timeout": 30,
+        "max_retries": 1,
+        "cache": {
+            "enabled": True,
+            "store_path": "trend_data/ai_analysis/store.json",
+        },
+        "skill": {
+            "path": "../.codebuddy/skills/fix-case-error",
+            "learned_file": "references/learned-corrections.md",
+        },
+    },
 }
 
 

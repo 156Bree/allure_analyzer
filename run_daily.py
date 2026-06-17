@@ -308,10 +308,11 @@ def _build_briefing(args, analyzed_dates, skipped_items, blocked_items):
     # 直达入口
     L_md.append("## 直达入口")
     L_md.append("")
-    L_md.append("- 趋势报告：`trend_data/trend_out/trend.html`")
+    L_md.append("- 统一入口（含趋势、日报、AI 分析/编辑）：先运行 `python3 serve.py`，再打开 `http://127.0.0.1:8765/`")
+    L_md.append("- 静态趋势文件：`trend_data/trend_out/trend.html`（只读，不建议作为 AI 分析入口）")
     if snaps:
         latest = snaps[-1]["date"]
-        L_md.append("- 最新一天完整报告：`trend_data/daily_out/%s/report.html`" % latest)
+        L_md.append("- 最新一天静态报告：`trend_data/daily_out/%s/report.html`（只读）" % latest)
     L_md.append("- 快照目录：`trend_data/snapshots/`")
     L_md.append("")
 
@@ -368,9 +369,10 @@ def _build_briefing(args, analyzed_dates, skipped_items, blocked_items):
                 ", ".join(new_fail[:5]) + (" ..." if len(new_fail) > 5 else "")))
     C.append("")
     C.append("📂 直达：")
-    C.append("   • 趋势:        " + os.path.join(os.path.abspath(args.trend_out), "trend.html"))
+    C.append("   • 统一入口(含AI): http://127.0.0.1:8765/  (先运行 python3 serve.py)")
+    C.append("   • 静态趋势(只读): " + os.path.join(os.path.abspath(args.trend_out), "trend.html"))
     if snaps:
-        C.append("   • 最新日报告:  " + os.path.join(
+        C.append("   • 静态日报(只读): " + os.path.join(
             os.path.abspath(args.analysis_out), snaps[-1]["date"], "report.html"))
     C.append("=" * 60)
     return "\n".join(C), md_text

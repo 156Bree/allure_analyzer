@@ -66,3 +66,23 @@ thresholds:
   pass_rate_good: 0.90    # >= 绿
   pass_rate_warn: 0.70    # >= 黄，否则红
 top_n: 10
+
+# --- AI 失败分析 -------------------------------------------------------------
+# 对每条失败 scenario 调 OpenAI 兼容大模型，结合 fix-case-error skill 产出
+# “结论/原因/建议”。全程降级不阻断：enabled=false / 无 key / 调用失败 → 报告照常生成。
+# 字数约束（结论≤20 / 原因≤80 / 建议≤80 字）在 skill 中规定，由模型直接产出简短文本；
+# 后端不做硬截断，store.json 保存模型原始输出，网页弹窗展示全文。
+ai:
+  enabled: true                  # 总开关；启用后会在有 key 时调用 LLM
+  base_url: "https://api.deepseek.com"   # OpenAI 兼容 /v1，自动拼 /chat/completions
+  model: "deepseek-v4-flash"
+  api_key: ""                  # 直接写入 API key（优先于 api_key_env；请勿提交到 git）
+  api_key_env: "DEEPSEEK_API_KEY"                  # 留空表示不从环境变量读取
+  timeout: 30                    # 单次请求超时秒数
+  max_retries: 1                 # 失败后的额外重试次数（轻量）
+  cache:
+    enabled: true                # 仅对“新增/变化且未被人工锁定”的失败项调 LLM
+    store_path: "trend_data/ai_analysis/store.json"   # 相对本工具目录
+  skill:
+    path: "../.codebuddy/skills/fix-case-error"        # 相对本工具目录
+    learned_file: "references/learned-corrections.md"  # 相对 skill.path

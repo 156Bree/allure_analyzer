@@ -299,19 +299,26 @@ function renderCaseTable(){
   rows.forEach((r,ri)=>{
     const badge=r.verdict==='Pass'?'b-pass':'b-fail';
     const jira=r.jira_url?`<a href="${esc(r.jira_url)}" target="_blank" class="drill">${esc(r.case_key)} ↗</a>`:esc(r.case_key);
+    const aiCount=r.scenario_idx.reduce((n,i)=>n+(aiFor(DATA.scenario_rows[i])?1:0),0);
+    const aiBadge=aiCount?` <span class="badge" style="background:#EDE9FE;color:#6D28D9" title="该 (case,device) 行已分析 ${aiCount} 条失败">🧠 ${aiCount}</span>`:'';
     html+=`<tr class="zebra border-b border-slate-100">
       <td class="px-2 py-2"><span class="caret" data-rid="${ri}">▶</span></td>
       <td class="px-3 py-2">${jira}</td>
       <td class="px-3 py-2">${r.owners.length?esc(r.owners.join(', ')):'<span class="text-slate-400">(no-owner)</span>'}</td>
       <td class="px-3 py-2">${r.components.length?esc(r.components.join(', ')):'<span class="text-slate-400">-</span>'}</td>
       <td class="px-3 py-2">${esc(r.host_display)}</td>
-      <td class="px-3 py-2"><span class="badge ${badge}">${r.verdict}</span></td>
+      <td class="px-3 py-2"><span class="badge ${badge}">${r.verdict}</span>${aiBadge}</td>
       <td class="px-3 py-2 text-slate-500">${r.n_pass}/${r.n_total}</td></tr>`;
     html+=`<tr class="scn-child hidden" data-child="${ri}"><td></td><td colspan="6" class="px-3 py-1">
       <table class="w-full text-xs">${r.scenario_idx.map(i=>{const s=DATA.scenario_rows[i];
+        const ai=aiFor(s);
+        const aiCell=(!s.is_pass)
+          ? (ai?`<a class="drill" title="查看 AI 失败分析" onclick="openAIModal(${i})">🧠 AI 分析</a>`:'<span class="text-slate-300">未分析</span>')
+          : '';
         return `<tr class="border-b border-slate-200"><td class="py-1 pr-2">${s.is_pass?'<span class="badge b-pass">Pass</span>':'<span class="badge b-fail">Fail</span>'}</td>
           <td class="py-1 pr-2 text-slate-500">${esc(s.status)}</td>
-          <td class="py-1">${esc(s.scenario)}</td></tr>`;}).join('')}</table></td></tr>`;
+          <td class="py-1">${esc(s.scenario)}</td>
+          <td class="py-1 pr-2 text-right whitespace-nowrap">${aiCell}</td></tr>`;}).join('')}</table></td></tr>`;
   });
   body.innerHTML=html;
   body.querySelectorAll('.caret').forEach(c=>c.addEventListener('click',()=>{
@@ -381,6 +388,102 @@ function openModal(title, rows){
 function closeModal(){document.getElementById('modal').classList.remove('show');}
 document.getElementById('modal').addEventListener('click',e=>{if(e.target.id==='modal')closeModal();});
 
+/* ---------------- AI 失败分析 ---------------- */
+// serve.py(http) 模式：从 /api/analysis 拉取最新 store 作为权威叠加；file:// 模式：用内嵌 ai。
+const SERVE_MODE = (location.protocol === 'http:' || location.protocol === 'https:');
+let AI_OVERLAY = {};   // fp -> entry
+function aiFor(s){
+  if(!s) return null;
+  const fp = s.ai_fp;
+  if(SERVE_MODE){ return (fp && AI_OVERLAY[fp]) ? AI_OVERLAY[fp] : null; }
+  return s.ai || null;
+}
+async function loadOverlay(){
+  if(!SERVE_MODE) return;
+  try{
+    const r = await fetch('/api/analysis');
+    if(r.ok){ AI_OVERLAY = (await r.json()) || {}; }
+  }catch(e){ /* serve 不可用则静默降级，使用空叠加 */ }
+}
+function aiMsg(t, ok){ const m=document.getElementById('aiMsg'); if(m){ m.textContent=t; m.style.color= ok?'#16A34A':'#DC2626'; } }
+function aiEvidenceFallback(s){
+  const msg = String((s&&s.status_message)||'').trim();
+  if(!msg) return '';
+  return msg.split('\n').filter(Boolean).slice(0,4).join('\n').slice(0,600);
+}
+function aiToggleEdit(on){
+  document.querySelectorAll('#modalBody .ai-view').forEach(e=>e.classList.toggle('hidden',on));
+  document.querySelectorAll('#modalBody .ai-edit').forEach(e=>e.classList.toggle('hidden',!on));
+  const sh=(id,v)=>{const b=document.getElementById(id); if(b)b.classList.toggle('hidden',!v);};
+  sh('aiEditBtn',!on); sh('aiSaveBtn',on); sh('aiCancelBtn',on);
+}
+function openAIModal(idx){
+  const s = DATA.scenario_rows[idx];
+  const ai = aiFor(s) || {};
+  const fp = s.ai_fp || '';
+  const srcBadge = ai.source==='manual'
+    ? '<span class="badge" style="background:#FEF3C7;color:#92400E">人工修正</span>'
+    : '<span class="badge" style="background:#DBEAFE;color:#1E40AF">AI</span>';
+  document.getElementById('modalTitle').innerHTML =
+    `AI 失败分析 · ${esc(s.case_key)} @ ${esc(s.host_display||s.host)} ${srcBadge}`;
+  const labels={conclusion:'结论',cause:'原因',suggestion:'建议',evidence:'分析依据'};
+  let h = `<div class="space-y-3 text-sm">
+    <div class="text-slate-500 text-xs">Scenario：${esc(s.scenario)}</div>`;
+  ['conclusion','cause','suggestion','evidence'].forEach(k=>{
+    const v = (k==='evidence' && !ai[k]) ? aiEvidenceFallback(s) : (ai[k]||'');
+    const rows = k==='evidence' ? 5 : 3;
+    h += `<div>
+      <div class="font-semibold text-slate-700">${labels[k]}</div>
+      <div class="ai-view whitespace-pre-wrap text-slate-800" data-k="${k}">${esc(v||'—')}</div>
+      <textarea class="ai-edit hidden w-full border border-slate-300 rounded p-2 mt-1 text-sm" data-k="${k}" rows="${rows}">${esc(v||'')}</textarea>
+    </div>`;
+  });
+  if(ai.model||ai.updated_at){
+    h += `<div class="text-xs text-slate-400">model=${esc(ai.model||'-')} · updated=${esc(ai.updated_at||'-')}</div>`;
+  }
+  if(SERVE_MODE){
+    h += `<div class="flex flex-wrap gap-2 pt-3 border-t">
+      <button id="aiEditBtn" class="px-3 py-1 rounded bg-blue-600 text-white" onclick="aiToggleEdit(true)">编辑</button>
+      <button id="aiSaveBtn" class="px-3 py-1 rounded bg-green-600 text-white hidden" onclick="aiSave('${fp}',${idx})">保存</button>
+      <button id="aiCancelBtn" class="px-3 py-1 rounded bg-slate-200 hidden" onclick="aiToggleEdit(false)">取消</button>
+      <button class="px-3 py-1 rounded bg-red-600 text-white" onclick="aiDelete('${fp}',${idx})">删除</button>
+      <button class="px-3 py-1 rounded bg-purple-600 text-white ml-auto" onclick="aiAbsorb('${fp}')" title="把人工修正写入 skill 的 learned-corrections.md，下次分析优先复用">吸收进 skill</button>
+    </div>
+    <div id="aiMsg" class="text-xs"></div>`;
+  } else {
+    h += `<div class="text-xs text-slate-400 pt-3 border-t">只读模式：用 <code>python3 serve.py --date &lt;YYYY-MM-DD&gt;</code> 打开本报告即可在线编辑/删除/吸收进 skill。</div>`;
+  }
+  h += `</div>`;
+  document.getElementById('modalBody').innerHTML = h;
+  document.getElementById('modal').classList.add('show');
+}
+async function aiPost(url, body){
+  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  let j={}; try{ j = await r.json(); }catch(e){}
+  if(!r.ok || !j.ok) throw new Error((j&&j.error)||('HTTP '+r.status));
+  return j;
+}
+async function aiSave(fp, idx){
+  const s = DATA.scenario_rows[idx];
+  const body = {action:'save', fp, case_key:s.case_key, host:s.host, scenario:s.scenario, status_message:s.status_message||''};
+  document.querySelectorAll('#modalBody .ai-edit').forEach(e=>{ body[e.dataset.k]=e.value; });
+  try{ const j = await aiPost('/api/analysis', body); AI_OVERLAY[fp]=j.entry; renderCaseTable(); openAIModal(idx); aiMsg('已保存（已锁定为人工修正）', true); }
+  catch(e){ aiMsg('保存失败：'+e.message, false); }
+}
+async function aiDelete(fp, idx){
+  if(!confirm('确认删除该条 AI 分析？删除后该失败项将显示“未分析”。')) return;
+  try{ await aiPost('/api/analysis', {action:'delete', fp}); delete AI_OVERLAY[fp]; renderCaseTable(); closeModal(); }
+  catch(e){ aiMsg('删除失败：'+e.message, false); }
+}
+async function aiAbsorb(fp){
+  try{
+    const j = await aiPost('/api/absorb', {fp});
+    const layer = j.layer==='general_rule' ? '通用规则层' : '具体案例层';
+    aiMsg(`已吸收进 skill（${layer}）`, true);
+  }
+  catch(e){ aiMsg('吸收失败：'+e.message, false); }
+}
+
 /* ---------------- Extra panels ---------------- */
 function simpleTable(cols, rows){
   let h=`<table class="w-full text-left text-sm"><thead><tr class="text-slate-600 border-b border-slate-200">${cols.map(c=>`<th class="px-3 py-2">${esc(c)}</th>`).join('')}</tr></thead><tbody>`;
@@ -414,10 +517,14 @@ function initExtra(){
 }
 
 /* ---------------- Boot ---------------- */
-initHeader(); initCards(); initCharts(); initFilters(); renderCaseTable();
-initSummary('casesum','casesumSub','casesumTable','case_summary');
-initSummary('stepsum','stepsumSub','stepsumTable','scenario_summary');
-initExtra();
+async function boot(){
+  await loadOverlay();
+  initHeader(); initCards(); initCharts(); initFilters(); renderCaseTable();
+  initSummary('casesum','casesumSub','casesumTable','case_summary');
+  initSummary('stepsum','stepsumSub','stepsumTable','scenario_summary');
+  initExtra();
+}
+boot();
 </script>
 </body>
 </html>
