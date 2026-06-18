@@ -84,5 +84,5 @@ ai:
     enabled: true                # 仅对“新增/变化且未被人工锁定”的失败项调 LLM
     store_path: "trend_data/ai_analysis/store.json"   # 相对本工具目录
   skill:
-    path: "../.codebuddy/skills/fix-case-error"        # 相对本工具目录
+    path: ".codebuddy/skills/fix-case-error"         # 相对本工具目录
     learned_file: "references/learned-corrections.md"  # 相对 skill.path

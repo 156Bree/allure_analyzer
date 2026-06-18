@@ -650,3 +650,39 @@ Escalate to product defect only when all of the following are true:
 ### 4.10 References
 
 Load `references/false-positive-heuristics.md` when a quick classification checklist or wording template is needed.
+
+Load `references/learned-corrections.md` **first and with the highest priority**: it stores human-reviewed corrections absorbed from the daily report. When a failure matches an entry there, prefer that human conclusion/cause/suggestion over a fresh generic guess.
+
+## 5. AI 自动分析输出规范 (Automated Analysis Output Contract)
+
+This section governs how an automated LLM caller (the “分析龙虾” daily report) must use this skill to analyze a single failed scenario and return a structured result. It does **not** change any triage logic above; it only fixes the **output shape and length** for machine consumption.
+
+### 5.1 Context Priority
+
+When analyzing one failed scenario, read context in this order and let earlier sources win on conflict:
+
+1. `references/learned-corrections.md` — human-reviewed corrections (highest priority; if a matching entry exists, reuse its judgment).
+2. The specialized experience zones in this `SKILL.md` (`LIP-1712` / `LIP-2297` / `LIP-2195`, etc.) when case key / host / scenario / signature match.
+3. The historical baseline and fusion strategy for everything else.
+
+### 5.2 Strict JSON Output
+
+Return **only** a single JSON object, no Markdown, no code fence, no extra prose:
+
+```json
+{"conclusion": "...", "cause": "...", "suggestion": "..."}
+```
+
+- `conclusion`: 结论，**≤ 20 个汉字**。优先给出 False Positive / implement script error / test infrastructure error / 疑似产品缺陷 的明确判定。
+- `cause`: 原因，**≤ 80 个汉字**。简述最可能的失败根因（断言时机、轮询缺失、前置不足、状态源混淆、readiness 未证明、wrapper 空输出等）。
+- `suggestion`: 建议，**≤ 80 个汉字**。给出最小可行的修复方向（改轮询 / 查终态 / 补校验 / 设备隔离重试等）。
+
+### 5.3 Length & Language Rules
+
+- 直接产出符合上述字数上限的**简短中文文本**；不要为了凑字数而展开。字数上限由模型自我遵守，调用方不会再做硬截断，网页弹窗会展示全文。
+- 三个字段都必须存在且非空；信息不足时也要给出最合理的保守判断，并在 `cause` 中说明“证据不足”。
+- 不要输出 `证据`/`边界条件` 等额外字段；它们属于人工深入分析，自动结果只保留结论/原因/建议三项。
+
+### 5.4 Determinism Guidance
+
+同一条失败（相同 case/host/scenario/报错）应尽量给出**一致的结论与原因方向**，措辞可不同但判断要稳定，便于跨日缓存复用与人工复核。
