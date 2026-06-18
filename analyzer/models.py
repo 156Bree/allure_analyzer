@@ -7,7 +7,7 @@
 - 对外状态只分 Pass / Fail：is_pass = status in passed_values；其余(含 broken)计 Fail。
 """
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Dict
 
 
 @dataclass
@@ -42,6 +42,8 @@ class TestCaseRecord:
     case_key_source: str = ""      # suite / subSuite / links.url / none
 
     status_message: str = ""       # 失败信息（供未来 fail 原因分析）
+    log_links: List[Dict[str, str]] = field(default_factory=list)  # Allure attachment/log 轻量链接
+    log_preview: str = ""          # 关联 log 前几行预览
     hidden: bool = False           # Allure hidden 标记（visible 子集对账用）
 
     jira_url: str = ""             # case 对应 Jira 链接（UNLINKED 时为空）

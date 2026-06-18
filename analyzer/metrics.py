@@ -33,6 +33,7 @@ def build_analysis(records, config, report_meta):
     for i, r in enumerate(records):
         scenario_rows.append({
             "idx": i,
+            "history_id": r.history_id,
             "scenario": r.name,
             "case_key": r.case_key,
             "jira_url": r.jira_url,
@@ -47,6 +48,8 @@ def build_analysis(records, config, report_meta):
             "retries_count": r.retries_count,
             "severity": r.severity,
             "status_message": r.status_message,
+            "log_links": r.log_links or [],
+            "log_preview": r.log_preview or "",
         })
 
     # ---------- case 索引 ----------

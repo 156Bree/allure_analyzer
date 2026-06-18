@@ -39,10 +39,14 @@ if HERE not in sys.path:
 
 from analyzer.config import load_config            # noqa: E402
 from analyzer.ai import store as store_mod          # noqa: E402
+from analyzer.ai import llm_client                  # noqa: E402
+from analyzer.ai import skill_context               # noqa: E402
 
 _FP_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 _SAVE_FIELDS = ("case_key", "host", "scenario", "status_message",
                 "conclusion", "cause", "suggestion", "evidence")
+_MAX_GENERAL_RULES = skill_context.MAX_GENERAL_RULES
+_MAX_CASE_EXAMPLES = skill_context.MAX_CASE_EXAMPLES
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +156,7 @@ def _choose_learned_layer(ai_cfg, entry):
         "title": "%s · %s" % (_g(entry, "case_key") or "(no-case)", _g(entry, "scenario") or "(no-scenario)"),
         "applicability": _g(entry, "cause"),
         "boundary": "仅确认与该 case/host/scenario 失败特征一致时复用。",
+        "reason": "未启用模型判定或判定失败，保守建议写入具体案例层。",
     }
     if not bool(ai_cfg.get("enabled")):
         return fallback
@@ -163,9 +168,10 @@ def _choose_learned_layer(ai_cfg, entry):
         "You maintain a pytest/Allure failure triage skill. Decide whether one human correction "
         "should become a reusable general rule or remain a specific case example. "
         "Return ONLY JSON: {\"layer\":\"general_rule|case_example\",\"title\":\"...\","
-        "\"applicability\":\"...\",\"boundary\":\"...\"}. "
+        "\"applicability\":\"...\",\"boundary\":\"...\",\"reason\":\"...\"}. "
         "Choose general_rule only when the correction describes a pattern reusable across multiple cases; "
-        "choose case_example when it depends on exact case, host, scenario, or one-off data."
+        "choose case_example when it depends on exact case, host, scenario, or one-off data. "
+        "reason must briefly explain why this layer is recommended."
     )
     user_prompt = "\n".join([
         "Human correction to absorb:",
@@ -193,6 +199,7 @@ def _choose_learned_layer(ai_cfg, entry):
             "title": str(result.get("title") or fallback["title"]).strip(),
             "applicability": str(result.get("applicability") or fallback["applicability"]).strip(),
             "boundary": str(result.get("boundary") or fallback["boundary"]).strip(),
+            "reason": str(result.get("reason") or fallback["reason"]).strip(),
         }
     except Exception as e:  # noqa: BLE001
         sys.stderr.write("[serve] skill 层级判定失败，按具体案例写入：%s\n" % e)
@@ -207,6 +214,37 @@ def _remove_fp_blocks(text, fp):
     for p in patterns:
         text = re.sub(p, "\n", text, flags=re.DOTALL)
     return text
+
+
+def _learned_usage(text):
+    return {
+        "general_rule": len(re.findall(r"<!-- rule:fp=", text or "")),
+        "case_example": len(re.findall(r"<!-- entry:fp=", text or "")),
+        "limits": {
+            "general_rule": _MAX_GENERAL_RULES,
+            "case_example": _MAX_CASE_EXAMPLES,
+        },
+    }
+
+
+def _usage_payload(learned_path):
+    text = ""
+    if learned_path and os.path.isfile(learned_path):
+        with open(learned_path, "r", encoding="utf-8") as f:
+            text = _ensure_learned_sections(f.read())
+    else:
+        text = _ensure_learned_sections("")
+    return _learned_usage(text)
+
+
+def _assert_capacity(text, layer):
+    usage = _learned_usage(text)
+    if layer == "general_rule" and usage["general_rule"] >= _MAX_GENERAL_RULES:
+        raise RuntimeError("通用规则层已满（%d/%d）。请先在 learned-corrections.md 删除或合并一些通用规则后再写入。" %
+                           (usage["general_rule"], _MAX_GENERAL_RULES))
+    if layer != "general_rule" and usage["case_example"] >= _MAX_CASE_EXAMPLES:
+        raise RuntimeError("具体案例层已满（%d/%d）。请先在 learned-corrections.md 删除或合并一些具体案例后再写入。" %
+                           (usage["case_example"], _MAX_CASE_EXAMPLES))
 
 
 def _insert_before(text, marker, block):
@@ -251,8 +289,22 @@ def _build_case_example_block(fp, entry):
     ])
 
 
-def _absorb_entry(learned_path, fp, entry, ai_cfg):
-    """把一条人工修正幂等写入 learned 文件；由模型决定通用规则层或具体案例层。"""
+def _sanitize_decision(decision, entry):
+    decision = dict(decision or {})
+    layer = str(decision.get("layer") or "case_example").strip()
+    if layer not in ("general_rule", "case_example"):
+        layer = "case_example"
+    return {
+        "layer": layer,
+        "title": str(decision.get("title") or _g(entry, "conclusion") or _g(entry, "case_key") or "未命名修正").strip(),
+        "applicability": str(decision.get("applicability") or _g(entry, "cause")).strip(),
+        "boundary": str(decision.get("boundary") or "仅在失败特征匹配时复用。").strip(),
+        "reason": str(decision.get("reason") or "用户确认后写入。").strip(),
+    }
+
+
+def _write_absorbed_entry(learned_path, fp, entry, decision):
+    """按用户确认后的 decision 幂等写入 learned 文件。"""
     if not learned_path:
         raise RuntimeError("未配置 skill learned 文件路径")
 
@@ -263,7 +315,8 @@ def _absorb_entry(learned_path, fp, entry, ai_cfg):
     text = _ensure_learned_sections(text)
     text = _remove_fp_blocks(text, fp)
 
-    decision = _choose_learned_layer(ai_cfg or {}, entry)
+    decision = _sanitize_decision(decision, entry)
+    _assert_capacity(text, decision.get("layer"))
     if decision.get("layer") == "general_rule":
         block = _build_general_rule_block(fp, entry, decision)
         new_text = _insert_before(text, "<!-- general-rules-end -->", block)
@@ -276,7 +329,14 @@ def _absorb_entry(learned_path, fp, entry, ai_cfg):
         os.makedirs(d, exist_ok=True)
     with open(learned_path, "w", encoding="utf-8") as f:
         f.write(new_text)
+    skill_context.refresh_learned_index(learned_path)
     return decision
+
+
+def _absorb_entry(learned_path, fp, entry, ai_cfg):
+    """兼容旧调用：先模型预判，再直接写入。新前端使用 preview + commit。"""
+    decision = _choose_learned_layer(ai_cfg or {}, entry)
+    return _write_absorbed_entry(learned_path, fp, entry, decision)
 
 
 # ---------------------------------------------------------------------------
@@ -318,6 +378,18 @@ class ReportHandler(SimpleHTTPRequestHandler):
     def log_message(self, fmt, *args):  # 降噪：简洁单行日志
         sys.stderr.write("[serve] %s - %s\n" % (self.address_string(), fmt % args))
 
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-store")
+        return SimpleHTTPRequestHandler.end_headers(self)
+
+    def _disable_html_conditional_cache(self, path):
+        if path.endswith(".html"):
+            for k in ("If-Modified-Since", "If-None-Match"):
+                try:
+                    del self.headers[k]
+                except KeyError:
+                    pass
+
     def _redirect_home(self):
         self.send_response(302)
         self.send_header("Location", self.home_path)
@@ -330,6 +402,7 @@ class ReportHandler(SimpleHTTPRequestHandler):
         if path == "/":
             self._redirect_home()
             return
+        self._disable_html_conditional_cache(path)
         return SimpleHTTPRequestHandler.do_HEAD(self)
 
     def do_GET(self):
@@ -344,6 +417,7 @@ class ReportHandler(SimpleHTTPRequestHandler):
         if path == "/":
             self._redirect_home()
             return
+        self._disable_html_conditional_cache(path)
         return SimpleHTTPRequestHandler.do_GET(self)
 
     # -- POST ----------------------------------------------------------------
@@ -400,11 +474,33 @@ class ReportHandler(SimpleHTTPRequestHandler):
         entry = st.get(fp)
         if not entry:
             return self._err("该 fp 无分析记录，无法吸收", 404)
-        try:
-            decision = _absorb_entry(self.learned_path, fp, entry, self.ai_cfg)
-        except Exception as e:  # noqa: BLE001
-            return self._err("写入 skill 失败：%s" % e, 500)
-        return self._send_json({"ok": True, "layer": decision.get("layer", "case_example")})
+        action = str(body.get("action") or "").strip()
+        if not action:
+            return self._err("页面脚本版本过旧：请强制刷新报告页（Cmd+Shift+R）后再吸收进 skill。", 409)
+        if action == "preview":
+            try:
+                decision = _choose_learned_layer(self.ai_cfg or {}, entry)
+                decision = _sanitize_decision(decision, entry)
+                usage = _usage_payload(self.learned_path)
+            except Exception as e:  # noqa: BLE001
+                return self._err("预判 skill 层级失败：%s" % e, 500)
+            return self._send_json({"ok": True, "decision": decision, "usage": usage})
+
+        if action == "commit":
+            decision = {
+                "layer": body.get("layer"),
+                "title": body.get("title"),
+                "applicability": body.get("applicability"),
+                "boundary": body.get("boundary"),
+                "reason": body.get("reason"),
+            }
+            try:
+                decision = _write_absorbed_entry(self.learned_path, fp, entry, decision)
+            except Exception as e:  # noqa: BLE001
+                return self._err("写入 skill 失败：%s" % e, 500)
+            return self._send_json({"ok": True, "layer": decision.get("layer", "case_example"), "decision": decision})
+
+        return self._err("未知 action：%s" % action)
 
 
 # ---------------------------------------------------------------------------

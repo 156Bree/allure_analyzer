@@ -66,13 +66,13 @@ def run_ai_analysis(analysis, config, base_dir, log=print):
         api_key = os.environ.get(api_key_env or "OPENAI_API_KEY", "")
     can_call_llm = enabled and bool(api_key)
 
-    # 仅在需要调用 LLM 时才构造 system prompt（读取 skill 内容）
-    system_prompt = None
+    # 仅在需要调用 LLM 时解析 skill 路径；system prompt 会按当前 failure 检索相关案例。
+    skill_dir = ""
+    learned_rel = "references/learned-corrections.md"
     if can_call_llm:
         skill_cfg = ai_cfg.get("skill") or {}
         skill_dir = skill_context.resolve_skill_dir(skill_cfg.get("path", ""), base_dir)
-        learned_rel = skill_cfg.get("learned_file", "references/learned-corrections.md")
-        system_prompt = skill_context.build_system_prompt(skill_dir, learned_rel)
+        learned_rel = skill_cfg.get("learned_file", learned_rel)
 
     model = ai_cfg.get("model", "")
     timeout = int(ai_cfg.get("timeout", 30) or 30)
@@ -99,6 +99,7 @@ def run_ai_analysis(analysis, config, base_dir, log=print):
 
         # 3) 调 LLM
         try:
+            system_prompt = skill_context.build_system_prompt(skill_dir, learned_rel, failure=f)
             user_prompt = skill_context.build_user_prompt(f)
             result = llm_client.chat_json(
                 base_url, api_key, model, system_prompt, user_prompt,

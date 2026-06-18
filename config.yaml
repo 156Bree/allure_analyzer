@@ -75,7 +75,7 @@ top_n: 10
 ai:
   enabled: true                  # 总开关；启用后会在有 key 时调用 LLM
   base_url: "https://api.deepseek.com"   # OpenAI 兼容 /v1，自动拼 /chat/completions
-  model: "deepseek-v4-flash"
+  model: "deepseek-v4-pro"
   api_key: ""                  # 直接写入 API key（优先于 api_key_env；请勿提交到 git）
   api_key_env: "DEEPSEEK_API_KEY"                  # 留空表示不从环境变量读取
   timeout: 30                    # 单次请求超时秒数

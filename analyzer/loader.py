@@ -9,6 +9,7 @@
 import glob
 import json
 import os
+from urllib.parse import quote
 
 
 def _labels_map(d):
@@ -52,6 +53,82 @@ def _status_message(d):
         if isinstance(sd, dict):
             msg = sd.get("message") or sd.get("trace") or ""
     return (msg or "").strip()
+
+
+def _labels_host(d):
+    return _first(_labels_map(d), "host")
+
+
+def _collect_attachments(d):
+    out = []
+    out.extend(d.get("attachments") or [])
+
+    def walk(steps):
+        for st in steps or []:
+            out.extend(st.get("attachments") or [])
+            walk(st.get("steps") or [])
+    walk(d.get("steps") or [])
+    return [a for a in out if isinstance(a, dict) and a.get("source")]
+
+
+def _trend_url(abs_path):
+    parts = os.path.abspath(abs_path).split(os.sep)
+    if "trend_data" not in parts:
+        return ""
+    i = parts.index("trend_data")
+    rel = "/".join(parts[i + 1:])
+    return "/" + quote(rel)
+
+
+def _preview_text(path, max_lines=30, max_chars=6000):
+    try:
+        lines = []
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            for _ in range(max_lines):
+                line = f.readline()
+                if not line:
+                    break
+                lines.append(line.rstrip("\n"))
+        text = "\n".join(lines)
+        return text[:max_chars]
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _build_attachment_index(report_dir):
+    """从 allure_json/*-result.json 建 (host, historyId) -> log_links/log_preview。"""
+    root = os.path.join(report_dir, "allure_json")
+    if not os.path.isdir(root):
+        return {}
+    index = {}
+    for path in glob.glob(os.path.join(root, "*-result.json")):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+        except Exception:  # noqa: BLE001
+            continue
+        key = (_labels_host(d), d.get("historyId", "") or "")
+        if not key[0] or not key[1]:
+            continue
+        links = []
+        preview = ""
+        for a in _collect_attachments(d):
+            src = a.get("source", "") or ""
+            abs_src = os.path.join(root, src)
+            if not os.path.isfile(abs_src):
+                continue
+            if not preview:
+                preview = _preview_text(abs_src)
+            links.append({
+                "name": a.get("name", "") or os.path.basename(src),
+                "type": a.get("type", "") or "",
+                "source": src,
+                "url": _trend_url(abs_src),
+                "size": str(os.path.getsize(abs_src)),
+            })
+        if links:
+            index[key] = {"log_links": links, "log_preview": preview}
+    return index
 
 
 def _build_record(d, display_map, passed_values):
@@ -101,6 +178,7 @@ def load_records(report_dir, config):
     files = sorted(glob.glob(os.path.join(tc_dir, "*.json")))
     display_map = (config.get("device", {}) or {}).get("display_map", {}) or {}
     passed_values = set((config.get("status", {}) or {}).get("passed_values", ["passed"]))
+    attachment_index = _build_attachment_index(report_dir)
 
     stats = {
         "files_total": len(files),
@@ -127,6 +205,9 @@ def load_records(report_dir, config):
             stats["parse_failed_files"].append("%s (%s)" % (os.path.basename(f), e))
             continue
         rec = _build_record(d, display_map, passed_values)
+        att = attachment_index.get((rec.host, rec.history_id)) or {}
+        rec.log_links = att.get("log_links", []) or []
+        rec.log_preview = att.get("log_preview", "") or ""
         stats["parsed"] += 1
         if rec.hidden:
             stats["hidden"] += 1
@@ -153,8 +234,9 @@ def load_records(report_dir, config):
     if stats["dup_keys"]:
         print("[loader] 警告：发现 %d 处 (host, historyId) 重复，已保留最新结束记录并去重 %d 条。" % (
             stats["dup_keys"], stats["dup_dropped"]))
-    print("[loader] 解析文件 %d / 成功 %d / 失败 %d；去重后记录 %d 条（hidden=%d, visible=%d）。" % (
+    with_logs = sum(1 for r in records if getattr(r, "log_links", None))
+    print("[loader] 解析文件 %d / 成功 %d / 失败 %d；去重后记录 %d 条（hidden=%d, visible=%d，带log=%d）。" % (
         stats["files_total"], stats["parsed"], stats["parse_failed"],
-        len(records), stats["hidden"], stats["visible"]))
+        len(records), stats["hidden"], stats["visible"], with_logs))
     stats["records_after_dedup"] = len(records)
     return records, stats
